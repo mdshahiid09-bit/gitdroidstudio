@@ -1,5 +1,6 @@
 package com.gitdroidstudio.shahid.app.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,8 +35,10 @@ fun HomeScreen(
     onOpenRepo: (owner: String, repo: String, branch: String) -> Unit,
     onOpenSettings: () -> Unit
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showOpenRepoDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -122,12 +126,12 @@ fun HomeScreen(
                             Text("Create Project")
                         }
                         OutlinedButton(
-                            onClick = { viewModel.loadRepositories() },
+                            onClick = { showOpenRepoDialog = true },
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Sync Repos")
+                            Text("Open Repository")
                         }
                     }
                 }
@@ -184,10 +188,18 @@ fun HomeScreen(
                 is HomeUiState.Success -> {
                     if (state.filteredRepos.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "No repositories found.",
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.FolderOff, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = if (state.searchQuery.isEmpty()) "No repositories found for this GitHub account." else "No matching repositories.",
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                                )
+                                Spacer(modifier = Modifier.height(14.dp))
+                                Button(onClick = { showCreateDialog = true }) {
+                                    Text("Create First Project")
+                                }
+                            }
                         }
                     } else {
                         LazyColumn(
@@ -230,8 +242,72 @@ fun HomeScreen(
                             newRepo.defaultBranch
                         )
                     },
-                    onError = {}
+                    onError = { err ->
+                        Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                    }
                 )
+            }
+        )
+    }
+
+    // Real Open Repository Picker Dialog (STEP 4)
+    if (showOpenRepoDialog) {
+        var ownerInput by remember { mutableStateOf(currentUsername ?: "") }
+        var repoInput by remember { mutableStateOf("") }
+        var isOpening by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { showOpenRepoDialog = false },
+            title = { Text("Open Repository", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = ownerInput,
+                        onValueChange = { ownerInput = it },
+                        label = { Text("Owner (Username or Org)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = repoInput,
+                        onValueChange = { repoInput = it },
+                        label = { Text("Repository Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isOpening = true
+                        viewModel.openSpecificRepo(
+                            owner = ownerInput,
+                            repoName = repoInput,
+                            onSuccess = { targetRepo ->
+                                isOpening = false
+                                showOpenRepoDialog = false
+                                onOpenRepo(
+                                    targetRepo.owner?.login ?: ownerInput.trim(),
+                                    targetRepo.name,
+                                    targetRepo.defaultBranch
+                                )
+                            },
+                            onError = { err ->
+                                isOpening = false
+                                Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    },
+                    enabled = ownerInput.isNotBlank() && repoInput.isNotBlank() && !isOpening
+                ) {
+                    Text(if (isOpening) "Opening..." else "Open")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOpenRepoDialog = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -301,8 +377,9 @@ fun RepositoryItem(
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
+                val relativeTime = HomeViewModel.formatRelativeTime(repo.updatedAt)
                 Text(
-                    text = "Branch: ${repo.defaultBranch} • Updated: ${repo.updatedAt?.take(10) ?: "recent"}",
+                    text = "Branch: ${repo.defaultBranch} • Updated: $relativeTime",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
                 )
