@@ -1,5 +1,7 @@
 package com.gitdroidstudio.shahid.app.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -11,7 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -27,15 +29,19 @@ fun LoginScreen(
     viewModel: AuthViewModel,
     onLoginSuccess: () -> Unit
 ) {
+    val context = LocalContext.current
     var tokenInput by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsState()
     val haptic = LocalHapticFeedback.current
+    var showErrorDialog by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
             onLoginSuccess()
+        } else if (uiState is AuthUiState.Error) {
+            showErrorDialog = (uiState as AuthUiState.Error).message
         }
     }
 
@@ -68,12 +74,39 @@ fun LoginScreen(
             )
 
             Text(
-                text = "Enter your Personal Access Token (PAT)",
+                text = "Connect your account to build from anywhere",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // OAuth Button (STEP 3)
+            OutlinedButton(
+                onClick = {
+                    val oauthUrl = "https://github.com/settings/tokens/new?scopes=repo,workflow&description=GitDroid+Studio"
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl))
+                    context.startActivity(intent)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Continue with GitHub (Generate PAT)")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                HorizontalDivider(modifier = Modifier.weight(1f))
+                Text("  OR PASTE TOKEN  ", fontSize = 11.sp, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f))
+                HorizontalDivider(modifier = Modifier.weight(1f))
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             Card(
                 colors = CardDefaults.cardColors(
@@ -82,7 +115,7 @@ fun LoginScreen(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.VpnKey,
@@ -92,23 +125,23 @@ fun LoginScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Required Scopes:",
+                            text = "Required Token Scopes:",
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp,
+                            fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "• repo (Full control of private & public repositories)\n• workflow (Update & run GitHub Action workflows)",
-                        fontSize = 13.sp,
+                        text = "• repo (Full control of repositories)\n• workflow (Manage and trigger GitHub Action builds)",
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                         fontFamily = FontFamily.Monospace
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             OutlinedTextField(
                 value = tokenInput,
@@ -128,15 +161,6 @@ fun LoginScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            if (uiState is AuthUiState.Error) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = (uiState as AuthUiState.Error).message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
@@ -154,7 +178,7 @@ fun LoginScreen(
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("Authenticating...")
+                    Text("Validating with GitHub API...")
                 } else {
                     Icon(imageVector = Icons.Default.Lock, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
@@ -182,5 +206,19 @@ fun LoginScreen(
                 )
             }
         }
+    }
+
+    // Clear dialog message for invalid token (STEP 3)
+    showErrorDialog?.let { err ->
+        AlertDialog(
+            onDismissRequest = { showErrorDialog = null },
+            title = { Text("Authentication Error") },
+            text = { Text(err) },
+            confirmButton = {
+                Button(onClick = { showErrorDialog = null }) {
+                    Text("OK")
+                }
+            }
+        )
     }
 }
