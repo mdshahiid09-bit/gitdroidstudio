@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gitdroidstudio.shahid.app.data.api.GitHubApiService
 import com.gitdroidstudio.shahid.app.data.model.*
+import com.gitdroidstudio.shahid.app.model.BuildStatus
 import com.gitdroidstudio.shahid.app.util.ApkInstaller
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -81,7 +82,7 @@ class ProjectViewModel(
     private val _lastCommitSha = MutableStateFlow<String?>(null)
     val lastCommitSha: StateFlow<String?> = _lastCommitSha.asStateFlow()
 
-    private val _buildStatus = MutableStateFlow(BuildStatus.IDLE)
+    private val _buildStatus = MutableStateFlow<BuildStatus>(BuildStatus.Idle)
     val buildStatus: StateFlow<BuildStatus> = _buildStatus.asStateFlow()
 
     private val _currentRunId = MutableStateFlow<Long?>(null)
@@ -170,12 +171,12 @@ class ProjectViewModel(
                     val treeResponse = response.body()!!
                     val rootNodes = buildTreeHierarchy(treeResponse.tree)
                     _fileTree.value = rootNodes
-                    _statusMessage.value = "Tree synced (${'$'}{treeResponse.tree.size} items)"
+                    _statusMessage.value = "Tree synced (${treeResponse.tree.size} items)"
                 } else {
                     loadContentsShallow("")
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Sync error: ${'$'}{e.message}"
+                _statusMessage.value = "Sync error: ${e.message}"
                 loadContentsShallow("")
             }
         }
@@ -241,7 +242,7 @@ class ProjectViewModel(
         }
 
         viewModelScope.launch {
-            _statusMessage.value = "Opening ${'$'}{node.name}..."
+            _statusMessage.value = "Opening ${node.name}..."
             try {
                 val resp = apiService.getSingleFile(owner, repo, node.path, _activeBranch.value)
                 if (resp.isSuccessful && resp.body() != null) {
@@ -264,13 +265,13 @@ class ProjectViewModel(
                     )
                     _openTabs.value = _openTabs.value + newTab
                     _activeTabIndex.value = _openTabs.value.size - 1
-                    _statusMessage.value = "Editing ${'$'}{file.name}"
+                    _statusMessage.value = "Editing ${file.name}"
                     updateSuggestions(decoded)
                 } else {
-                    _statusMessage.value = "Error opening file (HTTP ${'$'}{resp.code()})"
+                    _statusMessage.value = "Error opening file (HTTP ${resp.code()})"
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Error: ${e.localizedMessage}"
             }
         }
     }
@@ -316,6 +317,8 @@ class ProjectViewModel(
     private fun applyAutoIndent(oldText: String, newText: String): String {
         // If Enter key was pressed (new text has 1 more newline and length is bigger)
         if (newText.length > oldText.length && newText.count { it == '\n' } == oldText.count { it == '\n' } + 1) {
+            val newlineIndex = newText.indexOf('\n')
+            // Find which newline was added
             for (i in newText.indices) {
                 if (newText[i] == '\n' && (i >= oldText.length || oldText[i] != '\n')) {
                     val prevLineStart = newText.lastIndexOf('\n', i - 1)
@@ -394,9 +397,9 @@ class ProjectViewModel(
 
     private fun saveAndCommit(tab: EditorTab, commitMessage: String?) {
         viewModelScope.launch {
-            _statusMessage.value = "Saving ${'$'}{tab.file.name} to GitHub..."
+            _statusMessage.value = "Saving ${tab.file.name} to GitHub..."
             try {
-                val message = commitMessage?.ifBlank { "Update ${'$'}{tab.file.name}" } ?: "Update ${'$'}{tab.file.name}"
+                val message = commitMessage?.ifBlank { "Update ${tab.file.name}" } ?: "Update ${tab.file.name}"
                 val encodedContent = Base64.encodeToString(tab.content.toByteArray(), Base64.NO_WRAP)
 
                 val updateReq = FileContentUpdate(
@@ -434,10 +437,10 @@ class ProjectViewModel(
                         remoteSha = remote.body()?.sha ?: ""
                     )
                 } else {
-                    _statusMessage.value = "Push failed: HTTP ${'$'}{response.code()}"
+                    _statusMessage.value = "Push failed: HTTP ${response.code()}"
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Save error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Save error: ${e.localizedMessage}"
             }
         }
     }
@@ -491,7 +494,7 @@ class ProjectViewModel(
 
     fun createFile(filePath: String, initialContent: String = "") {
         viewModelScope.launch {
-            _statusMessage.value = "Creating ${'$'}filePath on GitHub..."
+            _statusMessage.value = "Creating $filePath on GitHub..."
             try {
                 val encoded = Base64.encodeToString(initialContent.toByteArray(), Base64.NO_WRAP)
                 val response = apiService.createOrUpdateFile(
@@ -499,19 +502,19 @@ class ProjectViewModel(
                     repo = repo,
                     path = filePath,
                     body = FileContentUpdate(
-                        message = "Create ${'$'}filePath",
+                        message = "Create $filePath",
                         content = encoded,
                         branch = _activeBranch.value
                     )
                 )
                 if (response.isSuccessful) {
-                    _statusMessage.value = "File created: ${'$'}filePath"
+                    _statusMessage.value = "File created: $filePath"
                     loadFileTreeRecursive()
                 } else {
-                    _statusMessage.value = "Create failed: HTTP ${'$'}{response.code()}"
+                    _statusMessage.value = "Create failed: HTTP ${response.code()}"
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Error creating file: ${'$'}{e.message}"
+                _statusMessage.value = "Error creating file: ${e.message}"
             }
         }
     }
@@ -523,7 +526,7 @@ class ProjectViewModel(
 
     fun renameFile(oldNode: FileNode, newPath: String) {
         viewModelScope.launch {
-            _statusMessage.value = "Renaming ${'$'}{oldNode.name} to ${'$'}newPath..."
+            _statusMessage.value = "Renaming ${oldNode.name} to $newPath..."
             try {
                 val oldFileResp = apiService.getSingleFile(owner, repo, oldNode.path, _activeBranch.value)
                 if (!oldFileResp.isSuccessful || oldFileResp.body() == null) {
@@ -536,7 +539,7 @@ class ProjectViewModel(
                     repo = repo,
                     path = newPath,
                     body = FileContentUpdate(
-                        message = "Rename ${'$'}{oldNode.path} to ${'$'}newPath",
+                        message = "Rename ${oldNode.path} to $newPath",
                         content = content.replace("\n", ""),
                         branch = _activeBranch.value
                     )
@@ -558,7 +561,7 @@ class ProjectViewModel(
                     loadFileTreeRecursive()
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Rename error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Rename error: ${e.localizedMessage}"
             }
         }
     }
@@ -566,14 +569,14 @@ class ProjectViewModel(
     fun deleteFile(fileNode: FileNode) {
         val sha = fileNode.sha ?: return
         viewModelScope.launch {
-            _statusMessage.value = "Deleting ${'$'}{fileNode.name} on GitHub..."
+            _statusMessage.value = "Deleting ${fileNode.name} on GitHub..."
             try {
                 val response = apiService.deleteFile(
                     owner = owner,
                     repo = repo,
                     path = fileNode.path,
                     body = FileDeleteRequest(
-                        message = "Delete ${'$'}{fileNode.name}",
+                        message = "Delete ${fileNode.name}",
                         sha = sha,
                         branch = _activeBranch.value
                     )
@@ -581,20 +584,20 @@ class ProjectViewModel(
                 if (response.isSuccessful) {
                     val tabIdx = _openTabs.value.indexOfFirst { it.file.path == fileNode.path }
                     if (tabIdx >= 0) closeTab(tabIdx)
-                    _statusMessage.value = "Deleted ${'$'}{fileNode.name}"
+                    _statusMessage.value = "Deleted ${fileNode.name}"
                     loadFileTreeRecursive()
                 } else {
-                    _statusMessage.value = "Delete failed (HTTP ${'$'}{response.code()})"
+                    _statusMessage.value = "Delete failed (HTTP ${response.code()})"
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Error: ${e.localizedMessage}"
             }
         }
     }
 
     fun deleteFolder(folderNode: FileNode) {
         viewModelScope.launch {
-            _statusMessage.value = "Deleting folder ${'$'}{folderNode.name}..."
+            _statusMessage.value = "Deleting folder ${folderNode.name}..."
             try {
                 fun collectFiles(node: FileNode, acc: MutableList<FileNode>) {
                     if (!node.isDirectory) {
@@ -613,17 +616,17 @@ class ProjectViewModel(
                             repo = repo,
                             path = f.path,
                             body = FileDeleteRequest(
-                                message = "Delete ${'$'}{f.path} during folder deletion",
+                                message = "Delete ${f.path} during folder deletion",
                                 sha = sha,
                                 branch = _activeBranch.value
                             )
                         )
                     }
                 }
-                _statusMessage.value = "Deleted folder ${'$'}{folderNode.name}"
+                _statusMessage.value = "Deleted folder ${folderNode.name}"
                 loadFileTreeRecursive()
             } catch (e: Exception) {
-                _statusMessage.value = "Error deleting folder: ${'$'}{e.message}"
+                _statusMessage.value = "Error deleting folder: ${e.message}"
             }
         }
     }
@@ -678,7 +681,7 @@ class ProjectViewModel(
                           java-version: 17
                           cache: gradle
                       - run: chmod +x gradlew
-                      - run: ${'$'}cmd
+                      - run: $cmd
                       - uses: actions/upload-artifact@v4
                         with:
                           name: app-debug
@@ -703,14 +706,14 @@ class ProjectViewModel(
                 delay(1500)
                 dispatchBuildInternal()
             } else {
-                _statusMessage.value = "Failed to create workflow (HTTP ${'$'}{createResp.code()})"
+                _statusMessage.value = "Failed to create workflow (HTTP ${createResp.code()})"
             }
         }
     }
 
     private fun dispatchBuildInternal() {
         viewModelScope.launch {
-            _buildStatus.value = BuildStatus.RUNNING
+            _buildStatus.value = BuildStatus.InProgress
             _canInstallApk.value = false
             _buildLogs.value = "🚀 Dispatching GitHub Actions build workflow...\n"
             try {
@@ -726,16 +729,16 @@ class ProjectViewModel(
                     delay(3000)
                     startPollingWorkflow()
                 } else if (dispatch.code() == 404) {
-                    _buildStatus.value = BuildStatus.FAILURE
-                    _workflowDispatchError.value = "Workflow 'build.yml' was not found on branch '${'$'}{_activeBranch.value}', or your GitHub PAT is missing the 'workflow' scope."
+                    _buildStatus.value = BuildStatus.Failure("Workflow 'build.yml' was not found or missing 'workflow' scope.")
+                    _workflowDispatchError.value = "Workflow 'build.yml' was not found on branch '${_activeBranch.value}', or your GitHub PAT is missing the 'workflow' scope."
                     _buildLogs.value += "Dispatch failed: HTTP 404 (Workflow not found or missing 'workflow' scope).\n"
                 } else {
-                    _buildStatus.value = BuildStatus.FAILURE
-                    _buildLogs.value += "Dispatch failed: HTTP ${'$'}{dispatch.code()} ${'$'}{dispatch.message()}\n"
+                    _buildStatus.value = BuildStatus.Failure("Dispatch failed: HTTP ${dispatch.code()} ${dispatch.message()}")
+                    _buildLogs.value += "Dispatch failed: HTTP ${dispatch.code()} ${dispatch.message()}\n"
                 }
             } catch (e: Exception) {
-                _buildStatus.value = BuildStatus.FAILURE
-                _buildLogs.value += "Error: ${'$'}{e.localizedMessage}\n"
+                _buildStatus.value = BuildStatus.Failure(e.localizedMessage ?: "Error")
+                _buildLogs.value += "Error: ${e.localizedMessage}\n"
             }
         }
     }
@@ -765,13 +768,13 @@ class ProjectViewModel(
 
                         if (latestRun.status == "completed") {
                             if (latestRun.conclusion == "success") {
-                                _buildStatus.value = BuildStatus.SUCCESS
+                                _buildStatus.value = BuildStatus.Success
                                 _canInstallApk.value = true
                                 _buildLogs.value += "\n\n🎉 BUILD FINISHED SUCCESSFULLY! Artifact ready to install."
                             } else {
-                                _buildStatus.value = BuildStatus.FAILURE
+                                _buildStatus.value = BuildStatus.Failure(latestRun.conclusion ?: "Build failed")
                                 _canInstallApk.value = false
-                                _buildLogs.value += "\n\n❌ BUILD FAILED (${'$'}{latestRun.conclusion})"
+                                _buildLogs.value += "\n\n❌ BUILD FAILED (${latestRun.conclusion})"
                             }
                             break
                         }
@@ -785,14 +788,14 @@ class ProjectViewModel(
     fun downloadAndInstallArtifact(context: Context) {
         val runId = _currentRunId.value ?: return
         viewModelScope.launch {
-            _statusMessage.value = "Fetching artifact for run #${'$'}runId..."
+            _statusMessage.value = "Fetching artifact for run #$runId..."
             try {
                 val artifactsResp = apiService.getArtifacts(owner, repo, runId)
                 if (artifactsResp.isSuccessful && !artifactsResp.body()?.artifacts.isNullOrEmpty()) {
                     val artifact = artifactsResp.body()!!.artifacts.find { it.name == "app-debug" }
                         ?: artifactsResp.body()!!.artifacts.first()
 
-                    _statusMessage.value = "Downloading ${'$'}{artifact.name} (${'$'}{artifact.sizeInBytes / 1024} KB)..."
+                    _statusMessage.value = "Downloading ${artifact.name} (${artifact.sizeInBytes / 1024} KB)..."
                     val result = ApkInstaller.downloadArtifactAndInstall(
                         context = context,
                         archiveUrl = artifact.archiveDownloadUrl,
@@ -803,13 +806,13 @@ class ProjectViewModel(
                         _latestExtractedApk.value = result.getOrNull()
                         _statusMessage.value = "APK extracted and package installer opened! 📱"
                     } else {
-                        _statusMessage.value = "Install failed: ${'$'}{result.exceptionOrNull()?.message}"
+                        _statusMessage.value = "Install failed: ${result.exceptionOrNull()?.message}"
                     }
                 } else {
-                    _statusMessage.value = "No build artifact found for run #${'$'}runId"
+                    _statusMessage.value = "No build artifact found for run #$runId"
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Error: ${e.localizedMessage}"
             }
         }
     }
@@ -820,7 +823,7 @@ class ProjectViewModel(
             viewModelScope.launch {
                 val result = ApkInstaller.saveApkToDownloads(context, apk)
                 _statusMessage.value = if (result.isSuccess) result.getOrNull() ?: "Saved to Downloads"
-                else "Failed to export: ${'$'}{result.exceptionOrNull()?.message}"
+                else "Failed to export: ${result.exceptionOrNull()?.message}"
             }
         } else {
             // Download directly from latest artifact
@@ -835,7 +838,7 @@ class ProjectViewModel(
                     authToken = authToken
                 )
                 _statusMessage.value = if (result.isSuccess) result.getOrNull() ?: "Saved to Downloads"
-                else "Failed: ${'$'}{result.exceptionOrNull()?.message}"
+                else "Failed: ${result.exceptionOrNull()?.message}"
             }
         }
     }
@@ -843,17 +846,17 @@ class ProjectViewModel(
     fun searchAcrossRepo(query: String) {
         if (query.isBlank()) return
         viewModelScope.launch {
-            _statusMessage.value = "Searching '${'$'}query' across ${'$'}repo..."
+            _statusMessage.value = "Searching '$query' across $repo..."
             try {
-                val resp = apiService.searchCode("${'$'}query repo:${'$'}owner/${'$'}repo")
+                val resp = apiService.searchCode("$query repo:$owner/$repo")
                 if (resp.isSuccessful && resp.body() != null) {
                     _searchResults.value = resp.body()!!.items
-                    _statusMessage.value = "Found ${'$'}{_searchResults.value.size} results for '${'$'}query'"
+                    _statusMessage.value = "Found ${_searchResults.value.size} results for '$query'"
                 } else {
-                    _statusMessage.value = "Search returned HTTP ${'$'}{resp.code()}"
+                    _statusMessage.value = "Search returned HTTP ${resp.code()}"
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Search error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Search error: ${e.localizedMessage}"
             }
         }
     }
@@ -881,18 +884,18 @@ class ProjectViewModel(
             try {
                 val currentSha = _branches.value.find { it.name == _activeBranch.value }?.commit?.sha
                 if (currentSha != null) {
-                    val req = CreateRefRequest(ref = "refs/heads/${'$'}newBranchName", sha = currentSha)
+                    val req = CreateRefRequest(ref = "refs/heads/$newBranchName", sha = currentSha)
                     val resp = apiService.createRef(owner, repo, req)
                     if (resp.isSuccessful) {
-                        _statusMessage.value = "Branch '${'$'}newBranchName' created!"
+                        _statusMessage.value = "Branch '$newBranchName' created!"
                         loadBranches()
                         switchBranch(newBranchName)
                     } else {
-                        _statusMessage.value = "Failed to create branch: HTTP ${'$'}{resp.code()}"
+                        _statusMessage.value = "Failed to create branch: HTTP ${resp.code()}"
                     }
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Error: ${e.localizedMessage}"
             }
         }
     }
@@ -914,30 +917,31 @@ class ProjectViewModel(
                 val req = CreatePullRequest(title = title, head = head, base = base, body = body)
                 val resp = apiService.createPullRequest(owner, repo, req)
                 if (resp.isSuccessful) {
-                    _statusMessage.value = "PR #${'$'}{resp.body()?.number} created!"
+                    _statusMessage.value = "PR #${resp.body()?.number} created!"
                     loadPullRequests()
                 } else {
-                    _statusMessage.value = "Failed to create PR: HTTP ${'$'}{resp.code()}"
+                    _statusMessage.value = "Failed to create PR: HTTP ${resp.code()}"
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Error: ${e.localizedMessage}"
             }
         }
     }
 
     fun mergePullRequest(prNumber: Int) {
         viewModelScope.launch {
-            _statusMessage.value = "Merging PR #${'$'}prNumber..."
+            _statusMessage.value = "Merging PR #$prNumber..."
             try {
                 val resp = apiService.mergePullRequest(owner, repo, prNumber, MergePullRequest())
                 if (resp.isSuccessful && resp.body()?.merged == true) {
-                    _statusMessage.value = "PR #${'$'}prNumber merged successfully!"
+                    _statusMessage.value = "PR #$prNumber merged successfully!"
                     loadPullRequests()
                 } else {
-                    _statusMessage.value = "Merge failed: ${'$'}{resp.body()?.message ?: "HTTP ${'$'}{resp.code()}"}"
+                    val errMsg = resp.body()?.message ?: ("HTTP " + resp.code())
+                    _statusMessage.value = "Merge failed: $errMsg"
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Error: ${'$'}{e.localizedMessage}"
+                _statusMessage.value = "Error: ${e.localizedMessage}"
             }
         }
     }
