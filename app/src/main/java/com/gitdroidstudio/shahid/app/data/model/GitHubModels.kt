@@ -54,6 +54,36 @@ data class FileDeleteRequest(
     val branch: String = "main"
 )
 
+data class GitTreeResponse(
+    val sha: String,
+    val url: String,
+    val tree: List<GitTreeNode>,
+    val truncated: Boolean = false
+)
+
+data class GitTreeNode(
+    val path: String,
+    val mode: String,
+    val type: String, // "blob" or "tree"
+    val sha: String,
+    val size: Long? = null,
+    val url: String? = null
+)
+
+data class ArtifactsResponse(
+    @SerializedName("total_count") val totalCount: Int,
+    val artifacts: List<ArtifactItem>
+)
+
+data class ArtifactItem(
+    val id: Long,
+    val name: String,
+    @SerializedName("size_in_bytes") val sizeInBytes: Long,
+    @SerializedName("archive_download_url") val archiveDownloadUrl: String,
+    val expired: Boolean = false,
+    @SerializedName("created_at") val createdAt: String?
+)
+
 data class WorkflowRunsResponse(
     @SerializedName("total_count") val totalCount: Int,
     @SerializedName("workflow_runs") val workflowRuns: List<WorkflowRun>
@@ -82,7 +112,15 @@ data class WorkflowJob(
     val status: String,
     val conclusion: String?,
     @SerializedName("started_at") val startedAt: String?,
-    @SerializedName("completed_at") val completedAt: String?
+    @SerializedName("completed_at") val completedAt: String?,
+    val steps: List<WorkflowStep>? = null
+)
+
+data class WorkflowStep(
+    val name: String,
+    val status: String,
+    val conclusion: String?,
+    val number: Int
 )
 
 data class Branch(
@@ -93,6 +131,16 @@ data class Branch(
 data class BranchCommit(
     val sha: String,
     val url: String?
+)
+
+data class CreateRefRequest(
+    val ref: String,
+    val sha: String
+)
+
+data class GitRef(
+    val ref: String,
+    val url: String
 )
 
 data class PullRequest(
@@ -112,6 +160,45 @@ data class CreatePullRequest(
     val body: String? = null
 )
 
+data class MergePullRequest(
+    @SerializedName("commit_title") val commitTitle: String? = null,
+    @SerializedName("commit_message") val commitMessage: String? = null,
+    @SerializedName("merge_method") val mergeMethod: String = "merge"
+)
+
+data class MergeResponse(
+    val sha: String,
+    val merged: Boolean,
+    val message: String
+)
+
+data class CodeSearchResponse(
+    @SerializedName("total_count") val totalCount: Int,
+    val items: List<CodeSearchItem>
+)
+
+data class CodeSearchItem(
+    val name: String,
+    val path: String,
+    val sha: String,
+    @SerializedName("html_url") val htmlUrl: String
+)
+
+data class GitHubRelease(
+    val id: Long,
+    @SerializedName("tag_name") val tagName: String,
+    val name: String?,
+    val body: String?,
+    @SerializedName("html_url") val htmlUrl: String,
+    @SerializedName("published_at") val publishedAt: String?
+)
+
 data class WorkflowDispatch(
     val ref: String = "main"
+)
+
+data class AccountInfo(
+    val username: String,
+    val token: String,
+    val avatarUrl: String?
 )
