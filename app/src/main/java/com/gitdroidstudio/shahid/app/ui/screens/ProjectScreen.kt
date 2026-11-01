@@ -41,9 +41,7 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gitdroidstudio.shahid.app.ui.viewmodel.BuildStatus
-import com.gitdroidstudio.shahid.app.ui.viewmodel.FileNode
-import com.gitdroidstudio.shahid.app.ui.viewmodel.ProjectViewModel
+import com.gitdroidstudio.shahid.app.ui.viewmodel.*
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,10 +71,14 @@ fun ProjectScreen(
     val pullRequests by viewModel.pullRequests.collectAsState()
     val conflictDialog by viewModel.conflictDialog.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
+    val suggestions by viewModel.suggestions.collectAsState()
+    val showMissingWorkflowDialog by viewModel.showMissingWorkflowDialog.collectAsState()
+    val workflowDispatchError by viewModel.workflowDispatchError.collectAsState()
 
     var showBuildSheet by remember { mutableStateOf(false) }
     var showCommitDialog by remember { mutableStateOf(false) }
-    var showNewFileDialog by remember { mutableStateOf<String?>(null) } // folder path to create inside
+    var showNewFileDialog by remember { mutableStateOf<String?>(null) }
+    var showNewFolderDialog by remember { mutableStateOf<String?>(null) }
     var showRenameDialog by remember { mutableStateOf<FileNode?>(null) }
     var showDeleteConfirmDialog by remember { mutableStateOf<FileNode?>(null) }
     var showBranchDialog by remember { mutableStateOf(false) }
@@ -86,6 +88,8 @@ fun ProjectScreen(
     var showSearchReplaceBar by remember { mutableStateOf(false) }
     var showRepoSearchModal by remember { mutableStateOf(false) }
     var showSnippetsModal by remember { mutableStateOf(false) }
+    var showDiffDialog by remember { mutableStateOf(false) }
+    var showGoToLineDialog by remember { mutableStateOf(false) }
 
     var searchQuery by remember { mutableStateOf("") }
     var replaceQuery by remember { mutableStateOf("") }
@@ -106,7 +110,6 @@ fun ProjectScreen(
                 modifier = Modifier.width(310.dp),
                 drawerContainerColor = MaterialTheme.colorScheme.surface
             ) {
-                // Header as requested in STEP 5: "Project Files" title only. No plus icon.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -138,6 +141,7 @@ fun ProjectScreen(
                                 }
                             },
                             onNewFileInFolder = { folderPath -> showNewFileDialog = folderPath },
+                            onNewFolderInFolder = { folderPath -> showNewFolderDialog = folderPath },
                             onRename = { showRenameDialog = it },
                             onDelete = { showDeleteConfirmDialog = it }
                         )
@@ -175,7 +179,7 @@ fun ProjectScreen(
                                     maxLines = 1
                                 )
                                 Text(
-                                    text = "branch: $activeBranch",
+                                    text = "branch: ${'$'}activeBranch",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -219,7 +223,7 @@ fun ProjectScreen(
                         )
                     )
 
-                    // Desktop-style Top Menu Bar (Every item wired to real action)
+                    // Desktop-style Top Menu Bar
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -254,7 +258,7 @@ fun ProjectScreen(
                                             )
                                             DropdownMenuItem(
                                                 text = { Text("New Folder") },
-                                                onClick = { activeMenu = null; showNewFileDialog = "" }
+                                                onClick = { activeMenu = null; showNewFolderDialog = "" }
                                             )
                                             DropdownMenuItem(
                                                 text = { Text("Open Repository") },
@@ -273,6 +277,10 @@ fun ProjectScreen(
                                             DropdownMenuItem(
                                                 text = { Text("Redo") },
                                                 onClick = { activeMenu = null; viewModel.redo() }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Go to line") },
+                                                onClick = { activeMenu = null; showGoToLineDialog = true }
                                             )
                                             DropdownMenuItem(
                                                 text = { Text("Find & Replace") },
@@ -312,21 +320,27 @@ fun ProjectScreen(
                                                 }
                                             )
                                             DropdownMenuItem(
-                                                text = { Text("Download APK") },
+                                                text = { Text(if (viewModel.isAndroidProject()) "Download APK" else "Download Artifact") },
                                                 onClick = {
                                                     activeMenu = null
                                                     viewModel.saveApkToDownloads(context)
                                                 }
                                             )
-                                            DropdownMenuItem(
-                                                text = { Text("Install APK") },
-                                                onClick = {
-                                                    activeMenu = null
-                                                    viewModel.downloadAndInstallArtifact(context)
-                                                }
-                                            )
+                                            if (viewModel.isAndroidProject()) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Install APK") },
+                                                    onClick = {
+                                                        activeMenu = null
+                                                        viewModel.downloadAndInstallArtifact(context)
+                                                    }
+                                                )
+                                            }
                                         }
                                         "Git" -> {
+                                            DropdownMenuItem(
+                                                text = { Text("Diff / Compare Changes") },
+                                                onClick = { activeMenu = null; showDiffDialog = true }
+                                            )
                                             DropdownMenuItem(
                                                 text = { Text("Save & Commit") },
                                                 onClick = { activeMenu = null; showCommitDialog = true }
@@ -433,6 +447,21 @@ fun ProjectScreen(
                             shadowElevation = 2.dp
                         ) {
                             Column(modifier = Modifier.padding(8.dp)) {
+                                val matchCount = remember(currentTab?.content, searchQuery) {
+                                    if (searchQuery.isNotEmpty() && currentTab != null) {
+                                        var count = 0
+                                        var idx = 0
+                                        while (idx < currentTab.content.length) {
+                                            val found = currentTab.content.indexOf(searchQuery, idx, ignoreCase = true)
+                                            if (found >= 0) {
+                                                count++
+                                                idx = found + searchQuery.length
+                                            } else break
+                                        }
+                                        count
+                                    } else 0
+                                }
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     OutlinedTextField(
                                         value = searchQuery,
@@ -442,6 +471,14 @@ fun ProjectScreen(
                                         singleLine = true
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
+                                    if (searchQuery.isNotEmpty()) {
+                                        Text(
+                                            text = "${'$'}matchCount found",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
                                     IconButton(onClick = { showSearchReplaceBar = false }) {
                                         Icon(Icons.Default.Close, contentDescription = "Close")
                                     }
@@ -477,7 +514,29 @@ fun ProjectScreen(
             },
             bottomBar = {
                 Column {
-                    // Mobile Symbol Shortcut Row ({ } ( ) ; = " ' < > / Tab)
+                    // Auto-complete suggestion chips row
+                    if (suggestions.isNotEmpty()) {
+                        LazyRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF202020))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(suggestions) { suggestion ->
+                                SuggestionChip(
+                                    onClick = { viewModel.applySuggestion(suggestion) },
+                                    label = { Text(suggestion, fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
+                                    colors = SuggestionChipDefaults.suggestionChipColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Mobile Symbol Shortcut Row
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -534,7 +593,7 @@ fun ProjectScreen(
                                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                                 ) {
                                     Text(
-                                        text = "Build: ${buildStatus.name}",
+                                        text = "Build: ${'$'}{buildStatus.name}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = when (buildStatus) {
                                             BuildStatus.RUNNING -> MaterialTheme.colorScheme.primary
@@ -600,7 +659,7 @@ fun ProjectScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.8f)
+                    .fillMaxHeight(0.85f)
                     .padding(16.dp)
             ) {
                 Row(
@@ -633,7 +692,7 @@ fun ProjectScreen(
                         items(workflowSteps) { step ->
                             SuggestionChip(
                                 onClick = {},
-                                label = { Text("${step.name}: ${step.conclusion ?: step.status}", fontSize = 10.sp) },
+                                label = { Text("${'$'}{step.name}: ${'$'}{step.conclusion ?: step.status}", fontSize = 10.sp) },
                                 colors = SuggestionChipDefaults.suggestionChipColors(
                                     containerColor = if (step.conclusion == "success") Color(0xFF1B5E20) else Color(0xFF282828)
                                 )
@@ -682,14 +741,26 @@ fun ProjectScreen(
                     }
 
                     if (canInstallApk) {
-                        Button(
-                            onClick = { viewModel.downloadAndInstallArtifact(context) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27AE60)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Download, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Install APK")
+                        if (viewModel.isAndroidProject()) {
+                            Button(
+                                onClick = { viewModel.downloadAndInstallArtifact(context) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27AE60)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Install APK")
+                            }
+                        } else {
+                            Button(
+                                onClick = { viewModel.saveApkToDownloads(context) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27AE60)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Download Artifact")
+                            }
                         }
                     }
                 }
@@ -697,7 +768,171 @@ fun ProjectScreen(
         }
     }
 
-    // 409 Conflict Dialog (STEP 6)
+    // Git Diff Viewer Dialog
+    if (showDiffDialog) {
+        val diffLines = remember(currentTab) { viewModel.getDiffForCurrentTab() }
+        AlertDialog(
+            onDismissRequest = { showDiffDialog = false },
+            title = {
+                Text(
+                    text = "Git Diff: ${'$'}{currentTab?.file?.name ?: "No file"}",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Comparing local buffer against GitHub HEAD commit.",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (diffLines.isEmpty() || diffLines.all { it.type == DiffType.UNCHANGED }) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No changes. File is identical to remote.", color = Color.Gray)
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(320.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF141414))
+                                .padding(6.dp)
+                        ) {
+                            items(diffLines) { line ->
+                                val bgColor = when (line.type) {
+                                    DiffType.ADDED -> Color(0xFF1B5E20).copy(alpha = 0.5f)
+                                    DiffType.DELETED -> Color(0xFFB71C1C).copy(alpha = 0.5f)
+                                    DiffType.UNCHANGED -> Color.Transparent
+                                }
+                                val textColor = when (line.type) {
+                                    DiffType.ADDED -> Color(0xFF81C784)
+                                    DiffType.DELETED -> Color(0xFFE57373)
+                                    DiffType.UNCHANGED -> Color(0xFFB0BEC5)
+                                }
+                                val prefix = when (line.type) {
+                                    DiffType.ADDED -> "+ "
+                                    DiffType.DELETED -> "- "
+                                    DiffType.UNCHANGED -> "  "
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(bgColor)
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = prefix + line.text,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        color = textColor
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showDiffDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // Go to Line Dialog
+    if (showGoToLineDialog) {
+        var lineInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showGoToLineDialog = false },
+            title = { Text("Go to Line") },
+            text = {
+                OutlinedTextField(
+                    value = lineInput,
+                    onValueChange = { lineInput = it.filter { c -> c.isDigit() } },
+                    label = { Text("Line Number") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val num = lineInput.toIntOrNull()
+                        if (num != null) {
+                            Toast.makeText(context, "Navigating to line ${'$'}num", Toast.LENGTH_SHORT).show()
+                            showGoToLineDialog = false
+                        }
+                    }
+                ) {
+                    Text("Go")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGoToLineDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Missing Workflow Dialog
+    if (showMissingWorkflowDialog) {
+        var buildCmd by remember { mutableStateOf("./gradlew assembleDebug --stacktrace") }
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissMissingWorkflowDialog() },
+            title = { Text("Add Build Workflow?", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Workflow '.github/workflows/build.yml' was not found in this repository. Would you like GitDroid Studio to generate a GitHub Actions workflow to build your project?",
+                        fontSize = 13.sp
+                    )
+                    OutlinedTextField(
+                        value = buildCmd,
+                        onValueChange = { buildCmd = it },
+                        label = { Text("Build Command") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { viewModel.createWorkflowAndBuild(buildCmd) }) {
+                    Text("Generate & Build")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissMissingWorkflowDialog() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Workflow Dispatch Error Dialog
+    workflowDispatchError?.let { errText ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissWorkflowDispatchError() },
+            title = { Text("Build Dispatch Error", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error) },
+            text = { Text(errText, fontSize = 13.sp) },
+            confirmButton = {
+                Button(onClick = { viewModel.dismissWorkflowDispatchError() }) {
+                    Text("Dismiss")
+                }
+            }
+        )
+    }
+
+    // 409 Conflict Dialog
     conflictDialog?.let { conflict ->
         AlertDialog(
             onDismissRequest = {},
@@ -726,7 +961,7 @@ fun ProjectScreen(
                 OutlinedTextField(
                     value = commitMsg,
                     onValueChange = { commitMsg = it },
-                    placeholder = { Text("Update ${currentTab?.file?.name ?: "file"}") },
+                    placeholder = { Text("Update ${'$'}{currentTab?.file?.name ?: "file"}") },
                     label = { Text("Commit Message") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -759,7 +994,7 @@ fun ProjectScreen(
                 OutlinedTextField(
                     value = fileName,
                     onValueChange = { fileName = it },
-                    placeholder = { Text(if (basePath.isEmpty()) "app/src/main/Example.kt" else "$basePath/NewFile.kt") },
+                    placeholder = { Text(if (basePath.isEmpty()) "app/src/main/Example.kt" else "${'$'}basePath/NewFile.kt") },
                     label = { Text("File Path") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -768,7 +1003,7 @@ fun ProjectScreen(
                 Button(
                     onClick = {
                         if (fileName.isNotBlank()) {
-                            val fullPath = if (basePath.isEmpty()) fileName else "$basePath/$fileName"
+                            val fullPath = if (basePath.isEmpty()) fileName else "${'$'}basePath/${'$'}fileName"
                             viewModel.createFile(fullPath)
                             showNewFileDialog = null
                         }
@@ -785,12 +1020,48 @@ fun ProjectScreen(
         )
     }
 
+    // New Folder Dialog
+    showNewFolderDialog?.let { basePath ->
+        var folderName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showNewFolderDialog = null },
+            title = { Text("Create New Folder") },
+            text = {
+                OutlinedTextField(
+                    value = folderName,
+                    onValueChange = { folderName = it.filter { c -> c.isLetterOrDigit() || c == '/' || c == '_' || c == '-' } },
+                    placeholder = { Text("my_package") },
+                    label = { Text("Folder Name / Path") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (folderName.isNotBlank()) {
+                            val fullPath = if (basePath.isEmpty()) folderName else "${'$'}basePath/${'$'}folderName"
+                            viewModel.createFolder(fullPath)
+                            showNewFolderDialog = null
+                        }
+                    }
+                ) {
+                    Text("Create Folder")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewFolderDialog = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Rename Dialog
     showRenameDialog?.let { node ->
         var newPath by remember { mutableStateOf(node.path) }
         AlertDialog(
             onDismissRequest = { showRenameDialog = null },
-            title = { Text("Rename ${node.name}") },
+            title = { Text("Rename ${'$'}{node.name}") },
             text = {
                 OutlinedTextField(
                     value = newPath,
@@ -821,12 +1092,21 @@ fun ProjectScreen(
     showDeleteConfirmDialog?.let { target ->
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = null },
-            title = { Text("Delete ${target.name}?") },
-            text = { Text("Are you sure you want to delete this file? This will immediately push a deletion commit to GitHub.") },
+            title = { Text("Delete ${'$'}{target.name}?") },
+            text = {
+                Text(
+                    if (target.isDirectory) "Are you sure you want to delete this folder and ALL files inside it? This will push deletion commits to GitHub."
+                    else "Are you sure you want to delete this file? This will immediately push a deletion commit to GitHub."
+                )
+            },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.deleteFile(target)
+                        if (target.isDirectory) {
+                            viewModel.deleteFolder(target)
+                        } else {
+                            viewModel.deleteFile(target)
+                        }
                         showDeleteConfirmDialog = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
@@ -937,15 +1217,15 @@ fun ProjectScreen(
                         items(pullRequests) { pr ->
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(10.dp)) {
-                                    Text("#${pr.number}: ${pr.title}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text("By: ${pr.user?.login ?: "user"}", fontSize = 11.sp, color = Color.Gray)
+                                    Text("#${'$'}{pr.number}: ${'$'}{pr.title}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("By: ${'$'}{pr.user?.login ?: "user"}", fontSize = 11.sp, color = Color.Gray)
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Button(
                                         onClick = { viewModel.mergePullRequest(pr.number) },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6F42C1)),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text("Merge PR #${pr.number}")
+                                        Text("Merge PR #${'$'}{pr.number}")
                                     }
                                 }
                             }
@@ -966,7 +1246,7 @@ fun ProjectScreen(
     if (showRepoSearchModal) {
         AlertDialog(
             onDismissRequest = { showRepoSearchModal = false },
-            title = { Text("Search Code in $repo") },
+            title = { Text("Search Code in ${'$'}repo") },
             text = {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1020,7 +1300,7 @@ fun ProjectScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    viewModel.insertSymbol("\n$code\n")
+                                    viewModel.insertSymbol("\n${'$'}code\n")
                                     showSnippetsModal = false
                                 }
                         ) {
@@ -1050,6 +1330,7 @@ fun FileTreeNodeItem(
     depth: Int,
     onNodeClick: (FileNode) -> Unit,
     onNewFileInFolder: (String) -> Unit,
+    onNewFolderInFolder: (String) -> Unit,
     onRename: (FileNode) -> Unit,
     onDelete: (FileNode) -> Unit
 ) {
@@ -1131,6 +1412,13 @@ fun FileTreeNodeItem(
                             onNewFileInFolder(node.path)
                         }
                     )
+                    DropdownMenuItem(
+                        text = { Text("New Folder Here") },
+                        onClick = {
+                            expandedContextMenu = false
+                            onNewFolderInFolder(node.path)
+                        }
+                    )
                 }
                 DropdownMenuItem(
                     text = { Text("Rename") },
@@ -1156,6 +1444,7 @@ fun FileTreeNodeItem(
                     depth = depth + 1,
                     onNodeClick = onNodeClick,
                     onNewFileInFolder = onNewFileInFolder,
+                    onNewFolderInFolder = onNewFolderInFolder,
                     onRename = onRename,
                     onDelete = onDelete
                 )
@@ -1236,7 +1525,7 @@ class CodeSyntaxVisualTransformation(private val fileName: String) : VisualTrans
         val builder = buildAnnotatedString {
             append(raw)
 
-            val keywordPattern = "\\b(${kotlinKeywords.joinToString("|")})\\b".toRegex()
+            val keywordPattern = "\\b(${'$'}{kotlinKeywords.joinToString("|")})\\b".toRegex()
             for (match in keywordPattern.findAll(raw)) {
                 addStyle(
                     SpanStyle(color = Color(0xFFC586C0), fontWeight = FontWeight.SemiBold),
