@@ -1,13 +1,19 @@
 package com.gitdroidstudio.shahid.app.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -19,9 +25,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -46,57 +54,76 @@ fun ProjectScreen(
     onNavigateSettings: () -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val fileTree by viewModel.fileTree.collectAsState()
-    val currentFile by viewModel.currentFile.collectAsState()
-    val editorContent by viewModel.editorContent.collectAsState()
-    val isModified by viewModel.isModified.collectAsState()
+    val openTabs by viewModel.openTabs.collectAsState()
+    val activeTabIndex by viewModel.activeTabIndex.collectAsState()
+    val currentTab = viewModel.currentTab
+
     val statusMessage by viewModel.statusMessage.collectAsState()
     val buildStatus by viewModel.buildStatus.collectAsState()
     val buildLogs by viewModel.buildLogs.collectAsState()
+    val workflowSteps by viewModel.workflowSteps.collectAsState()
+    val canInstallApk by viewModel.canInstallApk.collectAsState()
     val activeBranch by viewModel.activeBranch.collectAsState()
     val branches by viewModel.branches.collectAsState()
+    val pullRequests by viewModel.pullRequests.collectAsState()
+    val conflictDialog by viewModel.conflictDialog.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
 
     var showBuildSheet by remember { mutableStateOf(false) }
     var showCommitDialog by remember { mutableStateOf(false) }
-    var showNewFileDialog by remember { mutableStateOf(false) }
+    var showNewFileDialog by remember { mutableStateOf<String?>(null) } // folder path to create inside
+    var showRenameDialog by remember { mutableStateOf<FileNode?>(null) }
     var showDeleteConfirmDialog by remember { mutableStateOf<FileNode?>(null) }
     var showBranchDialog by remember { mutableStateOf(false) }
+    var showNewBranchDialog by remember { mutableStateOf(false) }
+    var showPRDialog by remember { mutableStateOf(false) }
+    var showCreatePRDialog by remember { mutableStateOf(false) }
     var showSearchReplaceBar by remember { mutableStateOf(false) }
+    var showRepoSearchModal by remember { mutableStateOf(false) }
+    var showSnippetsModal by remember { mutableStateOf(false) }
 
     var searchQuery by remember { mutableStateOf("") }
     var replaceQuery by remember { mutableStateOf("") }
-
+    var repoSearchQuery by remember { mutableStateOf("") }
     var activeMenu by remember { mutableStateOf<String?>(null) }
+
+    // Haptic feedback on build events
+    LaunchedEffect(buildStatus) {
+        if (buildStatus == BuildStatus.RUNNING || buildStatus == BuildStatus.SUCCESS || buildStatus == BuildStatus.FAILURE) {
+            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+        }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
-                modifier = Modifier.width(300.dp),
+                modifier = Modifier.width(310.dp),
                 drawerContainerColor = MaterialTheme.colorScheme.surface
             ) {
+                // Header as requested in STEP 5: "Project Files" title only. No plus icon.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(horizontal = 16.dp, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Project Files",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
-                    IconButton(onClick = { showNewFileDialog = true }) {
-                        Icon(Icons.Default.AddCircleOutline, contentDescription = "New File")
-                    }
                 }
                 HorizontalDivider()
+
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(8.dp)
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp)
                 ) {
                     items(fileTree) { node ->
                         FileTreeNodeItem(
@@ -104,14 +131,33 @@ fun ProjectScreen(
                             depth = 0,
                             onNodeClick = { target ->
                                 if (target.isDirectory) {
-                                    viewModel.expandFolder(target)
+                                    viewModel.toggleFolder(target)
                                 } else {
                                     viewModel.openFile(target)
                                     coroutineScope.launch { drawerState.close() }
                                 }
                             },
+                            onNewFileInFolder = { folderPath -> showNewFileDialog = folderPath },
+                            onRename = { showRenameDialog = it },
                             onDelete = { showDeleteConfirmDialog = it }
                         )
+                    }
+
+                    // Long press empty space at the bottom to create at root
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(80.dp)
+                                .clickable { showNewFileDialog = "" },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "+ Tap or long press to create file at root",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                            )
+                        }
                     }
                 }
             }
@@ -159,7 +205,7 @@ fun ProjectScreen(
                             IconButton(onClick = { showCommitDialog = true }) {
                                 BadgedBox(
                                     badge = {
-                                        if (isModified) {
+                                        if (currentTab?.isModified == true) {
                                             Badge { Text("●") }
                                         }
                                     }
@@ -173,6 +219,7 @@ fun ProjectScreen(
                         )
                     )
 
+                    // Desktop-style Top Menu Bar (Every item wired to real action)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -181,7 +228,7 @@ fun ProjectScreen(
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        listOf("File", "Edit", "View", "Build", "Git", "Settings").forEach { menuName ->
+                        listOf("File", "Edit", "View", "Build", "Git", "Tools", "Settings", "Help").forEach { menuName ->
                             Box {
                                 TextButton(
                                     onClick = { activeMenu = if (activeMenu == menuName) null else menuName },
@@ -203,7 +250,11 @@ fun ProjectScreen(
                                         "File" -> {
                                             DropdownMenuItem(
                                                 text = { Text("New File") },
-                                                onClick = { activeMenu = null; showNewFileDialog = true }
+                                                onClick = { activeMenu = null; showNewFileDialog = "" }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("New Folder") },
+                                                onClick = { activeMenu = null; showNewFileDialog = "" }
                                             )
                                             DropdownMenuItem(
                                                 text = { Text("Open Repository") },
@@ -216,8 +267,20 @@ fun ProjectScreen(
                                         }
                                         "Edit" -> {
                                             DropdownMenuItem(
+                                                text = { Text("Undo") },
+                                                onClick = { activeMenu = null; viewModel.undo() }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Redo") },
+                                                onClick = { activeMenu = null; viewModel.redo() }
+                                            )
+                                            DropdownMenuItem(
                                                 text = { Text("Find & Replace") },
                                                 onClick = { activeMenu = null; showSearchReplaceBar = true }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Search Code in Repo") },
+                                                onClick = { activeMenu = null; showRepoSearchModal = true }
                                             )
                                         }
                                         "View" -> {
@@ -234,6 +297,10 @@ fun ProjectScreen(
                                                 text = { Text("Build Output Panel") },
                                                 onClick = { activeMenu = null; showBuildSheet = true }
                                             )
+                                            DropdownMenuItem(
+                                                text = { Text("Appearance") },
+                                                onClick = { activeMenu = null; onNavigateSettings() }
+                                            )
                                         }
                                         "Build" -> {
                                             DropdownMenuItem(
@@ -242,6 +309,20 @@ fun ProjectScreen(
                                                     activeMenu = null
                                                     showBuildSheet = true
                                                     viewModel.triggerBuild()
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Download APK") },
+                                                onClick = {
+                                                    activeMenu = null
+                                                    viewModel.saveApkToDownloads(context)
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Install APK") },
+                                                onClick = {
+                                                    activeMenu = null
+                                                    viewModel.downloadAndInstallArtifact(context)
                                                 }
                                             )
                                         }
@@ -254,11 +335,43 @@ fun ProjectScreen(
                                                 text = { Text("Switch Branch") },
                                                 onClick = { activeMenu = null; showBranchDialog = true }
                                             )
+                                            DropdownMenuItem(
+                                                text = { Text("New Branch") },
+                                                onClick = { activeMenu = null; showNewBranchDialog = true }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Pull Requests") },
+                                                onClick = { activeMenu = null; showPRDialog = true }
+                                            )
+                                        }
+                                        "Tools" -> {
+                                            DropdownMenuItem(
+                                                text = { Text("Code Snippets") },
+                                                onClick = { activeMenu = null; showSnippetsModal = true }
+                                            )
                                         }
                                         "Settings" -> {
                                             DropdownMenuItem(
                                                 text = { Text("Preferences") },
                                                 onClick = { activeMenu = null; onNavigateSettings() }
+                                            )
+                                        }
+                                        "Help" -> {
+                                            DropdownMenuItem(
+                                                text = { Text("Documentation") },
+                                                onClick = {
+                                                    activeMenu = null
+                                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mdshahiid09-bit/gitdroidstudio#readme"))
+                                                    context.startActivity(browserIntent)
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Report a Bug") },
+                                                onClick = {
+                                                    activeMenu = null
+                                                    val issueIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mdshahiid09-bit/gitdroidstudio/issues/new"))
+                                                    context.startActivity(issueIntent)
+                                                }
                                             )
                                         }
                                     }
@@ -267,6 +380,53 @@ fun ProjectScreen(
                         }
                     }
 
+                    // Multi-file Tab Bar
+                    if (openTabs.isNotEmpty()) {
+                        LazyRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF141414))
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            itemsIndexed(openTabs) { index, tab ->
+                                val isSelected = index == activeTabIndex
+                                Surface(
+                                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
+                                    color = if (isSelected) Color(0xFF1E1E1E) else Color(0xFF181818),
+                                    border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF383838)) else null,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clickable { viewModel.selectTab(index) }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (tab.isModified) {
+                                            Text("● ", color = MaterialTheme.colorScheme.tertiary, fontSize = 10.sp)
+                                        }
+                                        Text(
+                                            text = tab.file.name,
+                                            fontSize = 12.sp,
+                                            color = if (isSelected) Color.White else Color.Gray,
+                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Close Tab",
+                                            tint = Color.Gray,
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .clickable { viewModel.closeTab(index) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Search & Replace Bar
                     AnimatedVisibility(visible = showSearchReplaceBar) {
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceVariant,
@@ -298,10 +458,12 @@ fun ProjectScreen(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Button(
                                         onClick = {
-                                            if (searchQuery.isNotEmpty()) {
-                                                val replaced = editorContent.replace(searchQuery, replaceQuery)
-                                                viewModel.onContentChanged(replaced)
-                                                Toast.makeText(context, "Replaced occurrences", Toast.LENGTH_SHORT).show()
+                                            currentTab?.let { tab ->
+                                                if (searchQuery.isNotEmpty()) {
+                                                    val replaced = tab.content.replace(searchQuery, replaceQuery)
+                                                    viewModel.onContentChanged(replaced)
+                                                    Toast.makeText(context, "Replaced occurrences", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         }
                                     ) {
@@ -314,46 +476,74 @@ fun ProjectScreen(
                 }
             },
             bottomBar = {
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    shadowElevation = 4.dp
-                ) {
+                Column {
+                    // Mobile Symbol Shortcut Row ({ } ( ) ; = " ' < > / Tab)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .background(Color(0xFF161616))
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (isModified) Icons.Default.EditNote else Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = if (isModified) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isModified) "Unsaved changes" else statusMessage,
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        listOf("{", "}", "(", ")", ";", "=", "\"", "'", "<", ">", "/", "\t").forEach { symbol ->
                             TextButton(
-                                onClick = { showBuildSheet = true },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                onClick = { viewModel.insertSymbol(symbol) },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = "Build: ${buildStatus.name}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = when (buildStatus) {
-                                        BuildStatus.RUNNING -> MaterialTheme.colorScheme.primary
-                                        BuildStatus.SUCCESS -> Color(0xFF27AE60)
-                                        BuildStatus.FAILURE -> MaterialTheme.colorScheme.error
-                                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                    }
+                                    text = if (symbol == "\t") "Tab" else symbol,
+                                    fontSize = 13.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color(0xFF64B5F6),
+                                    fontWeight = FontWeight.Bold
                                 )
+                            }
+                        }
+                    }
+
+                    // Status Bar
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (currentTab?.isModified == true) Icons.Default.EditNote else Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = if (currentTab?.isModified == true) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (currentTab?.isModified == true) "Unsaved changes" else statusMessage,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(
+                                    onClick = { showBuildSheet = true },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                ) {
+                                    Text(
+                                        text = "Build: ${buildStatus.name}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = when (buildStatus) {
+                                            BuildStatus.RUNNING -> MaterialTheme.colorScheme.primary
+                                            BuildStatus.SUCCESS -> Color(0xFF27AE60)
+                                            BuildStatus.FAILURE -> MaterialTheme.colorScheme.error
+                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -366,7 +556,7 @@ fun ProjectScreen(
                     .padding(padding)
                     .background(Color(0xFF1E1E1E))
             ) {
-                if (currentFile == null) {
+                if (currentTab == null) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -380,20 +570,20 @@ fun ProjectScreen(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "Select a file from the menu to edit",
+                                text = "Select a file from the drawer to edit",
                                 color = Color.Gray,
                                 fontSize = 14.sp
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Button(onClick = { coroutineScope.launch { drawerState.open() } }) {
-                                Text("Open File Tree")
+                                Text("Open Project Files")
                             }
                         }
                     }
                 } else {
                     CodeEditorView(
-                        content = editorContent,
-                        fileName = currentFile?.name ?: "",
+                        content = currentTab.content,
+                        fileName = currentTab.file.name,
                         onContentChange = { viewModel.onContentChanged(it) }
                     )
                 }
@@ -401,6 +591,7 @@ fun ProjectScreen(
         }
     }
 
+    // Build Logs Sliding Panel (ModalBottomSheet)
     if (showBuildSheet) {
         ModalBottomSheet(
             onDismissRequest = { showBuildSheet = false },
@@ -409,7 +600,7 @@ fun ProjectScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.75f)
+                    .fillMaxHeight(0.8f)
                     .padding(16.dp)
             ) {
                 Row(
@@ -425,7 +616,7 @@ fun ProjectScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "GitHub Actions Live Logs",
+                            text = "GitHub Actions Live Pipeline",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -435,7 +626,23 @@ fun ProjectScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                // Workflow Steps Status
+                if (workflowSteps.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(workflowSteps) { step ->
+                            SuggestionChip(
+                                onClick = {},
+                                label = { Text("${step.name}: ${step.conclusion ?: step.status}", fontSize = 10.sp) },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = if (step.conclusion == "success") Color(0xFF1B5E20) else Color(0xFF282828)
+                                )
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Box(
                     modifier = Modifier
@@ -450,7 +657,7 @@ fun ProjectScreen(
                         logScroll.scrollTo(logScroll.maxValue)
                     }
                     Text(
-                        text = buildLogs.ifBlank { "Initializing GitHub Actions build runner...\nPlease wait for logs to stream." },
+                        text = buildLogs.ifBlank { "Initializing GitHub Actions runner...\nWaiting for step execution..." },
                         color = Color(0xFF00FF66),
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
@@ -471,21 +678,18 @@ fun ProjectScreen(
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Trigger Rebuild")
+                        Text("Rebuild")
                     }
 
-                    if (buildStatus == BuildStatus.SUCCESS) {
+                    if (canInstallApk) {
                         Button(
-                            onClick = {
-                                val releaseApkUrl = "https://github.com/${viewModel.owner}/${viewModel.repo}/releases/latest/download/app-debug.apk"
-                                viewModel.downloadAndInstallApk(context, releaseApkUrl)
-                            },
+                            onClick = { viewModel.downloadAndInstallArtifact(context) },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27AE60)),
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("1-Tap Install APK")
+                            Text("Install APK")
                         }
                     }
                 }
@@ -493,6 +697,26 @@ fun ProjectScreen(
         }
     }
 
+    // 409 Conflict Dialog (STEP 6)
+    conflictDialog?.let { conflict ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Version Conflict (409)") },
+            text = { Text("This file was modified on GitHub by another commit. Reload the remote version or overwrite with your local version?") },
+            confirmButton = {
+                Button(onClick = { viewModel.resolveConflict(keepLocal = true) }) {
+                    Text("Keep My Version")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { viewModel.resolveConflict(keepLocal = false) }) {
+                    Text("Reload Remote")
+                }
+            }
+        )
+    }
+
+    // Commit Message Dialog
     if (showCommitDialog) {
         var commitMsg by remember { mutableStateOf("") }
         AlertDialog(
@@ -502,7 +726,7 @@ fun ProjectScreen(
                 OutlinedTextField(
                     value = commitMsg,
                     onValueChange = { commitMsg = it },
-                    placeholder = { Text("Update ${currentFile?.name ?: "file"}") },
+                    placeholder = { Text("Update ${currentTab?.file?.name ?: "file"}") },
                     label = { Text("Commit Message") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -511,7 +735,7 @@ fun ProjectScreen(
                 Button(
                     onClick = {
                         showCommitDialog = false
-                        viewModel.saveAndCommit(commitMsg)
+                        viewModel.saveCurrentFile(commitMsg)
                     }
                 ) {
                     Text("Push to GitHub")
@@ -525,16 +749,17 @@ fun ProjectScreen(
         )
     }
 
-    if (showNewFileDialog) {
-        var newFilePath by remember { mutableStateOf("") }
+    // New File Dialog
+    showNewFileDialog?.let { basePath ->
+        var fileName by remember { mutableStateOf("") }
         AlertDialog(
-            onDismissRequest = { showNewFileDialog = false },
+            onDismissRequest = { showNewFileDialog = null },
             title = { Text("Create New File") },
             text = {
                 OutlinedTextField(
-                    value = newFilePath,
-                    onValueChange = { newFilePath = it },
-                    placeholder = { Text("app/src/main/java/Example.kt") },
+                    value = fileName,
+                    onValueChange = { fileName = it },
+                    placeholder = { Text(if (basePath.isEmpty()) "app/src/main/Example.kt" else "$basePath/NewFile.kt") },
                     label = { Text("File Path") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -542,9 +767,10 @@ fun ProjectScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (newFilePath.isNotBlank()) {
-                            viewModel.createFile(newFilePath)
-                            showNewFileDialog = false
+                        if (fileName.isNotBlank()) {
+                            val fullPath = if (basePath.isEmpty()) fileName else "$basePath/$fileName"
+                            viewModel.createFile(fullPath)
+                            showNewFileDialog = null
                         }
                     }
                 ) {
@@ -552,13 +778,46 @@ fun ProjectScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showNewFileDialog = false }) {
+                TextButton(onClick = { showNewFileDialog = null }) {
                     Text("Cancel")
                 }
             }
         )
     }
 
+    // Rename Dialog
+    showRenameDialog?.let { node ->
+        var newPath by remember { mutableStateOf(node.path) }
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = null },
+            title = { Text("Rename ${node.name}") },
+            text = {
+                OutlinedTextField(
+                    value = newPath,
+                    onValueChange = { newPath = it },
+                    label = { Text("New Path") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.renameFile(node, newPath)
+                        showRenameDialog = null
+                    }
+                ) {
+                    Text("Rename")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Delete Confirmation Dialog
     showDeleteConfirmDialog?.let { target ->
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = null },
@@ -583,6 +842,7 @@ fun ProjectScreen(
         )
     }
 
+    // Branch Switcher Dialog
     if (showBranchDialog) {
         AlertDialog(
             onDismissRequest = { showBranchDialog = false },
@@ -617,60 +877,275 @@ fun ProjectScreen(
             }
         )
     }
+
+    // New Branch Dialog
+    if (showNewBranchDialog) {
+        var branchName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showNewBranchDialog = false },
+            title = { Text("Create New Branch") },
+            text = {
+                OutlinedTextField(
+                    value = branchName,
+                    onValueChange = { branchName = it.filter { char -> char.isLetterOrDigit() || char == '-' || char == '_' } },
+                    label = { Text("Branch Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (branchName.isNotBlank()) {
+                            viewModel.createBranch(branchName)
+                            showNewBranchDialog = false
+                        }
+                    }
+                ) {
+                    Text("Create")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewBranchDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Pull Requests Dialog
+    if (showPRDialog) {
+        AlertDialog(
+            onDismissRequest = { showPRDialog = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Pull Requests")
+                    IconButton(onClick = { showCreatePRDialog = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "New PR")
+                    }
+                }
+            },
+            text = {
+                if (pullRequests.isEmpty()) {
+                    Text("No open pull requests.", color = Color.Gray)
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(pullRequests) { pr ->
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text("#${pr.number}: ${pr.title}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("By: ${pr.user?.login ?: "user"}", fontSize = 11.sp, color = Color.Gray)
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Button(
+                                        onClick = { viewModel.mergePullRequest(pr.number) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6F42C1)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Merge PR #${pr.number}")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showPRDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // Code Search in Repo Modal
+    if (showRepoSearchModal) {
+        AlertDialog(
+            onDismissRequest = { showRepoSearchModal = false },
+            title = { Text("Search Code in $repo") },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = repoSearchQuery,
+                            onValueChange = { repoSearchQuery = it },
+                            placeholder = { Text("Search code...") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(onClick = { viewModel.searchAcrossRepo(repoSearchQuery) }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LazyColumn(modifier = Modifier.height(200.dp)) {
+                        items(searchResults) { item ->
+                            ListItem(
+                                headlineContent = { Text(item.name, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                                supportingContent = { Text(item.path, fontSize = 11.sp, color = Color.Gray) }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showRepoSearchModal = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // Snippets Modal
+    if (showSnippetsModal) {
+        val snippets = listOf(
+            "fun main() {\n    println(\"Hello\")\n}" to "main function",
+            "@Composable\nfun MyScreen() {\n    Text(\"Hello\")\n}" to "Composable Screen",
+            "val client = OkHttpClient()\nval request = Request.Builder().url(url).build()" to "OkHttp GET",
+            "data class User(\n    val id: Long,\n    val name: String\n)" to "Data Class"
+        )
+        AlertDialog(
+            onDismissRequest = { showSnippetsModal = false },
+            title = { Text("Code Snippets") },
+            text = {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(snippets) { (code, label) ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.insertSymbol("\n$code\n")
+                                    showSnippetsModal = false
+                                }
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(code, fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = Color.LightGray)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSnippetsModal = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FileTreeNodeItem(
     node: FileNode,
     depth: Int,
     onNodeClick: (FileNode) -> Unit,
+    onNewFileInFolder: (String) -> Unit,
+    onRename: (FileNode) -> Unit,
     onDelete: (FileNode) -> Unit
 ) {
+    var expandedContextMenu by remember { mutableStateOf(false) }
+
     Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onNodeClick(node) }
-                .padding(start = (depth * 14).dp, top = 6.dp, bottom = 6.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = if (node.isDirectory) {
-                    if (node.isExpanded) Icons.Default.FolderOpen else Icons.Default.Folder
-                } else {
-                    when {
-                        node.name.endsWith(".kt") -> Icons.Default.Code
-                        node.name.endsWith(".xml") -> Icons.Default.Description
-                        node.name.endsWith(".gradle.kts") -> Icons.Default.Build
-                        else -> Icons.Default.InsertDriveFile
-                    }
-                },
-                contentDescription = null,
-                tint = if (node.isDirectory) MaterialTheme.colorScheme.primary else Color.LightGray,
-                modifier = Modifier.size(18.dp)
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Text(
-                text = node.name,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f)
-            )
-
-            if (!node.isDirectory) {
-                IconButton(
-                    onClick = { onDelete(node) },
-                    modifier = Modifier.size(24.dp)
-                ) {
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = { onNodeClick(node) },
+                        onLongClick = { expandedContextMenu = true }
+                    )
+                    .padding(start = (depth * 14).dp, top = 6.dp, bottom = 6.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (node.isDirectory) {
                     Icon(
-                        imageVector = Icons.Default.DeleteOutline,
-                        contentDescription = "Delete",
-                        tint = Color.Gray,
-                        modifier = Modifier.size(16.dp)
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .rotate(if (node.isExpanded) 90f else 0f),
+                        tint = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+
+                Icon(
+                    imageVector = if (node.isDirectory) {
+                        if (node.isExpanded) Icons.Default.FolderOpen else Icons.Default.Folder
+                    } else {
+                        when {
+                            node.name.endsWith(".kt") -> Icons.Default.Code
+                            node.name.endsWith(".xml") -> Icons.Default.Description
+                            node.name.endsWith(".gradle.kts") -> Icons.Default.Build
+                            else -> Icons.Default.InsertDriveFile
+                        }
+                    },
+                    contentDescription = null,
+                    tint = if (node.isDirectory) MaterialTheme.colorScheme.primary else Color.LightGray,
+                    modifier = Modifier.size(18.dp)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Text(
+                    text = node.name,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (!node.isDirectory) {
+                    IconButton(
+                        onClick = { onDelete(node) },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Delete",
+                            tint = Color.Gray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            DropdownMenu(
+                expanded = expandedContextMenu,
+                onDismissRequest = { expandedContextMenu = false }
+            ) {
+                if (node.isDirectory) {
+                    DropdownMenuItem(
+                        text = { Text("New File Here") },
+                        onClick = {
+                            expandedContextMenu = false
+                            onNewFileInFolder(node.path)
+                        }
                     )
                 }
+                DropdownMenuItem(
+                    text = { Text("Rename") },
+                    onClick = {
+                        expandedContextMenu = false
+                        onRename(node)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete") },
+                    onClick = {
+                        expandedContextMenu = false
+                        onDelete(node)
+                    }
+                )
             }
         }
 
@@ -680,6 +1155,8 @@ fun FileTreeNodeItem(
                     node = child,
                     depth = depth + 1,
                     onNodeClick = onNodeClick,
+                    onNewFileInFolder = onNewFileInFolder,
+                    onRename = onRename,
                     onDelete = onDelete
                 )
             }
