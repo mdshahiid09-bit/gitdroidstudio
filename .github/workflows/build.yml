@@ -1,4 +1,4 @@
-name: Build and Release GitDroid Studio APK
+name: Build Android APKs
 
 on:
   push:
@@ -7,15 +7,18 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build Debug and Release APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -23,44 +26,83 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Build Debug APK with Gradle
-        uses: gradle/actions/setup-gradle@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
-          arguments: assembleDebug --stacktrace
+          gradle-version: '8.9'
 
-      - name: Upload APK Artifact
+      - name: Ensure Official Gradle Wrapper Jar is Committed
+        run: |
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Generating official Gradle wrapper jar..."
+            gradle wrapper --gradle-version 8.9 --distribution-type all
+            chmod +x gradlew
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions@users.noreply.github.com"
+            git add gradle/wrapper/gradle-wrapper.jar
+            git commit -m "Commit official gradle/wrapper/gradle-wrapper.jar [skip ci]" || true
+            git push origin main || true
+          else
+            chmod +x gradlew
+          fi
+
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Build Debug APK
+        id: build_debug
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build_debug_log.txt
+
+      - name: Report Failure Diagnostic
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LOG_FILE="failure_log.txt"
+          echo "=== Build Failure Diagnostic ===" > "$LOG_FILE"
+          for f in build_debug_log.txt; do
+            if [ -f "$f" ]; then
+              echo "--- Compiler / Error lines in $f ---" >> "$LOG_FILE"
+              grep -E "(^e:|^w: |error:|Compilation error|FAILURE:|FAILED)" "$f" | head -n 40 >> "$LOG_FILE" || true
+              echo "--- Log Tail: $f ---" >> "$LOG_FILE"
+              tail -n 40 "$f" >> "$LOG_FILE"
+              echo "" >> "$LOG_FILE"
+            fi
+          done
+          gh issue create --title "Build Diagnostic #${{ github.run_number }}" --body "Automated build failure log:
+          \`\`\`
+          $(cat "$LOG_FILE" | head -n 140)
+          \`\`\`" || true
+
+      - name: Upload Debug APK Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: GitDroidStudio-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
 
-      - name: Generate Release Tag
-        id: tagger
-        run: |
-          TAG_NAME="v1.0.$(date +%Y%m%d%H%M%S)"
-          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release and Upload APK
-        uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main'
-        with:
-          tag_name: ${{ steps.tagger.outputs.tag }}
-          name: GitDroid Studio ${{ steps.tagger.outputs.tag }}
-          body: |
-            ## GitDroid Studio Native Android App 🚀
-            Built automatically by GitHub Actions CI/CD!
-            
-            ### Highlights:
-            - Full Kotlin & Jetpack Compose Native IDE
-            - GitHub REST & Git Data API integration
-            - Live Action build triggering & log viewer
-            - In-App FileProvider APK installer
-            
-            **Direct Download:** Install the attached `app-debug.apk` below directly on your Android phone!
-          files: app/build/outputs/apk/debug/app-debug.apk
-          draft: false
-          prerelease: false
+      - name: Create GitHub Release
+        if: success()
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ASSETS=()
+          DEBUG_APK=$(ls app/build/outputs/apk/debug/*.apk 2>/dev/null | head -n 1)
+          if [ -n "$DEBUG_APK" ] && [ -f "$DEBUG_APK" ]; then
+            echo "Found Debug APK at: $DEBUG_APK"
+            cp "$DEBUG_APK" GitDroidStudio-debug.apk
+            ASSETS+=("GitDroidStudio-debug.apk")
+          fi
+
+          RELEASE_TAG="v1.0.0-build-${{ github.run_number }}"
+          NOTES="### GitDroid Studio Build #${{ github.run_number }}
+          - **Debug APK**: \`GitDroidStudio-debug.apk\` (Native Jetpack Compose Android IDE ready to install)"
+
+          gh release create "$RELEASE_TAG" "${ASSETS[@]}" \
+            --title "GitDroid Studio Release #${{ github.run_number }}" \
+            --notes "$NOTES" \
+            --latest
