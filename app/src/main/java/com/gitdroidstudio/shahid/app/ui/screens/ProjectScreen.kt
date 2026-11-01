@@ -1260,7 +1260,7 @@ fun ProjectScreen(
     if (showRepoSearchModal) {
         AlertDialog(
             onDismissRequest = { showRepoSearchModal = false },
-            title = { Text("Search Code in $repo") },
+            title = { Text("Search Code in ${viewModel.repo}") },
             text = {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
