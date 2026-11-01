@@ -35,13 +35,14 @@ object ApkInstaller {
             val client = OkHttpClient()
             val requestBuilder = Request.Builder().url(archiveUrl)
             if (!authToken.isNullOrBlank()) {
-                requestBuilder.header("Authorization", "token ${'$'}authToken")
+                val headerToken = if (authToken.startsWith("token ") || authToken.startsWith("Bearer ")) authToken else "token $authToken"
+                requestBuilder.header("Authorization", headerToken)
                 requestBuilder.header("Accept", "application/vnd.github+json")
             }
 
             val response = client.newCall(requestBuilder.build()).execute()
             if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to download artifact: HTTP ${'$'}{response.code}"))
+                return@withContext Result.failure(Exception("Failed to download artifact: HTTP ${response.code}"))
             }
 
             val body = response.body ?: return@withContext Result.failure(Exception("Empty artifact body"))
@@ -112,7 +113,7 @@ object ApkInstaller {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (!context.packageManager.canRequestPackageInstalls()) {
                 val settingsIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                    data = Uri.parse("package:${'$'}{context.packageName}")
+                    data = Uri.parse("package:${context.packageName}")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 context.startActivity(settingsIntent)
@@ -122,7 +123,7 @@ object ApkInstaller {
 
         val apkUri = FileProvider.getUriForFile(
             context,
-            "${'$'}{context.packageName}.fileprovider",
+            "${context.packageName}.fileprovider",
             apkFile
         )
 
@@ -139,7 +140,7 @@ object ApkInstaller {
      */
     suspend fun saveApkToDownloads(context: Context, apkFile: File): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val fileName = "GitDroidStudio-${'$'}{System.currentTimeMillis()}.apk"
+            val fileName = "GitDroidStudio-${System.currentTimeMillis()}.apk"
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, fileName)
@@ -154,7 +155,7 @@ object ApkInstaller {
                         input.copyTo(out)
                     }
                 }
-                Result.success("Saved to Downloads: ${'$'}fileName")
+                Result.success("Saved to Downloads: $fileName")
             } else {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 val destFile = File(downloadsDir, fileName)
@@ -163,7 +164,7 @@ object ApkInstaller {
                         input.copyTo(output)
                     }
                 }
-                Result.success("Saved to Downloads: ${'$'}{destFile.absolutePath}")
+                Result.success("Saved to Downloads: ${destFile.absolutePath}")
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -183,17 +184,18 @@ object ApkInstaller {
             val client = OkHttpClient()
             val requestBuilder = Request.Builder().url(archiveUrl)
             if (!authToken.isNullOrBlank()) {
-                requestBuilder.header("Authorization", "token ${'$'}authToken")
+                val headerToken = if (authToken.startsWith("token ") || authToken.startsWith("Bearer ")) authToken else "token $authToken"
+                requestBuilder.header("Authorization", headerToken)
                 requestBuilder.header("Accept", "application/vnd.github+json")
             }
 
             val response = client.newCall(requestBuilder.build()).execute()
             if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Download failed: HTTP ${'$'}{response.code}"))
+                return@withContext Result.failure(Exception("Download failed: HTTP ${response.code}"))
             }
 
             val body = response.body ?: return@withContext Result.failure(Exception("Empty artifact body"))
-            val fileName = "${'$'}artifactName-${'$'}{System.currentTimeMillis()}.zip"
+            val fileName = "$artifactName-${System.currentTimeMillis()}.zip"
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
@@ -209,7 +211,7 @@ object ApkInstaller {
                         input.copyTo(out)
                     }
                 }
-                Result.success("Saved to Downloads: ${'$'}fileName")
+                Result.success("Saved to Downloads: $fileName")
             } else {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 val destFile = File(downloadsDir, fileName)
@@ -218,7 +220,7 @@ object ApkInstaller {
                         input.copyTo(out)
                     }
                 }
-                Result.success("Saved to Downloads: ${'$'}{destFile.absolutePath}")
+                Result.success("Saved to Downloads: ${destFile.absolutePath}")
             }
         } catch (e: Exception) {
             Result.failure(e)

@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
                                 currentUserAvatar = authManager.getAvatarUrl(),
                                 currentUsername = authManager.getUsername(),
                                 onOpenRepo = { owner, repo, branch ->
-                                    navController.navigate("project/${'$'}owner/${'$'}repo/${'$'}branch")
+                                    navController.navigate("project/$owner/$repo/$branch")
                                 },
                                 onOpenSettings = {
                                     navController.navigate("settings")
