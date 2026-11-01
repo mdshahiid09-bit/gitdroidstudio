@@ -1,0 +1,66 @@
+name: Build and Release GitDroid Studio APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Debug APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GitDroidStudio-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Generate Release Tag
+        id: tagger
+        run: |
+          TAG_NAME="v1.0.$(date +%Y%m%d%H%M%S)"
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release and Upload APK
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: ${{ steps.tagger.outputs.tag }}
+          name: GitDroid Studio ${{ steps.tagger.outputs.tag }}
+          body: |
+            ## GitDroid Studio Native Android App 🚀
+            Built automatically by GitHub Actions CI/CD!
+            
+            ### Highlights:
+            - Full Kotlin & Jetpack Compose Native IDE
+            - GitHub REST & Git Data API integration
+            - Live Action build triggering & log viewer
+            - In-App FileProvider APK installer
+            
+            **Direct Download:** Install the attached `app-debug.apk` below directly on your Android phone!
+          files: app/build/outputs/apk/debug/app-debug.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
