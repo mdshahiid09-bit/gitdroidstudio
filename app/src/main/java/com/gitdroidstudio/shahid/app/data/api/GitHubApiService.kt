@@ -71,7 +71,7 @@ interface GitHubApiService {
         @Path("repo") repo: String,
         @Path(value = "path", encoded = true) path: String,
         @Body body: FileContentUpdate
-    ): Response<ResponseBody>
+    ): Response<CreateOrUpdateFileResponse>
 
     @HTTP(method = "DELETE", path = "repos/{owner}/{repo}/contents/{path}", hasBody = true)
     suspend fun deleteFile(

@@ -48,6 +48,17 @@ data class FileContentUpdate(
     val branch: String = "main"
 )
 
+data class CreateOrUpdateFileResponse(
+    val content: GitHubFile?,
+    val commit: CommitSummary?
+)
+
+data class CommitSummary(
+    val sha: String,
+    val message: String? = null,
+    @SerializedName("html_url") val htmlUrl: String? = null
+)
+
 data class FileDeleteRequest(
     val message: String,
     val sha: String,
