@@ -92,7 +92,7 @@ fun ProjectScreen(
                         Icon(Icons.Default.AddCircleOutline, contentDescription = "New File")
                     }
                 }
-                Divider()
+                HorizontalDivider()
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(8.dp)
@@ -773,7 +773,6 @@ class CodeSyntaxVisualTransformation(private val fileName: String) : VisualTrans
         val builder = buildAnnotatedString {
             append(raw)
 
-            // Simple token highlighting
             val keywordPattern = "\\b(${kotlinKeywords.joinToString("|")})\\b".toRegex()
             for (match in keywordPattern.findAll(raw)) {
                 addStyle(
@@ -783,7 +782,6 @@ class CodeSyntaxVisualTransformation(private val fileName: String) : VisualTrans
                 )
             }
 
-            // String literals highlighting ("...")
             val stringPattern = "\"[^\"]*\"".toRegex()
             for (match in stringPattern.findAll(raw)) {
                 addStyle(
@@ -793,7 +791,6 @@ class CodeSyntaxVisualTransformation(private val fileName: String) : VisualTrans
                 )
             }
 
-            // Comments highlighting (// ...)
             val commentPattern = "//.*".toRegex()
             for (match in commentPattern.findAll(raw)) {
                 addStyle(

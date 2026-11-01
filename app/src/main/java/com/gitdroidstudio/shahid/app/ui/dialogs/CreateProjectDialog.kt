@@ -8,8 +8,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateProjectDialog(
     onDismiss: () -> Unit,
@@ -19,7 +19,6 @@ fun CreateProjectDialog(
     var description by remember { mutableStateOf("") }
     var isPrivate by remember { mutableStateOf(false) }
     var selectedTemplate by remember { mutableStateOf("Compose Activity") }
-    var expandedDropdown by remember { mutableStateOf(false) }
 
     val templates = listOf(
         "Compose Activity",
@@ -51,32 +50,38 @@ fun CreateProjectDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                ExposedDropdownMenuBox(
-                    expanded = expandedDropdown,
-                    onExpandedChange = { expandedDropdown = !expandedDropdown }
-                ) {
-                    OutlinedTextField(
-                        value = selectedTemplate,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Project Template") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
-                        modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expandedDropdown,
-                        onDismissRequest = { expandedDropdown = false }
-                    ) {
-                        templates.forEach { template ->
-                            DropdownMenuItem(
-                                text = { Text(template) },
-                                onClick = {
-                                    selectedTemplate = template
-                                    expandedDropdown = false
-                                }
-                            )
+                Text(
+                    text = "Project Template:",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    templates.forEach { template ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (selectedTemplate == template)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = if (selectedTemplate == template)
+                                androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                            else null,
+                            onClick = { selectedTemplate = template },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = selectedTemplate == template,
+                                    onClick = { selectedTemplate = template }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(template, fontSize = 13.sp)
+                            }
                         }
                     }
                 }
