@@ -114,8 +114,9 @@ fun HomeScreen(
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
+                    val displayName = currentUsername ?: "Developer"
                     Text(
-                        text = "Welcome, ${'$'}{currentUsername ?: "Developer"} 👋",
+                        text = "Welcome, $displayName 👋",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -361,7 +362,7 @@ fun HomeScreen(
             title = { Text("Rename Repository", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Enter a new name for repository ${'$'}{targetRepo.name}:", fontSize = 13.sp)
+                    Text("Enter a new name for repository ${targetRepo.name}:", fontSize = 13.sp)
                     OutlinedTextField(
                         value = newRepoName,
                         onValueChange = { newRepoName = it.filter { c -> c.isLetterOrDigit() || c == '-' || c == '_' } },
@@ -383,7 +384,7 @@ fun HomeScreen(
                             onSuccess = {
                                 isSubmitting = false
                                 repoToRename = null
-                                Toast.makeText(context, "Repository renamed to ${'$'}newRepoName", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Repository renamed to $newRepoName", Toast.LENGTH_SHORT).show()
                             },
                             onError = { err ->
                                 isSubmitting = false
@@ -439,9 +440,10 @@ fun HomeScreen(
                             onSuccess = {
                                 isSubmitting = false
                                 repoToChangeVisibility = null
+                                val visibilityLabel = if (targetIsPrivate) "Private" else "Public"
                                 Toast.makeText(
                                     context,
-                                    "Repository is now ${'$'}{if (targetIsPrivate) "Private" else "Public"}",
+                                    "Repository is now $visibilityLabel",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             },
@@ -480,11 +482,11 @@ fun HomeScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "This action CANNOT be undone. This will permanently delete the repository '${'$'}{targetRepo.fullName}', including all commits, branches, issues, and workflows.",
+                        text = "This action CANNOT be undone. This will permanently delete the repository '${targetRepo.fullName}', including all commits, branches, issues, and workflows.",
                         fontSize = 13.sp
                     )
                     Text(
-                        text = "To confirm, please type the exact repository name '${'$'}{targetRepo.name}' below:",
+                        text = "To confirm, please type the exact repository name '${targetRepo.name}' below:",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -508,7 +510,7 @@ fun HomeScreen(
                             onSuccess = {
                                 isDeleting = false
                                 repoToDelete = null
-                                Toast.makeText(context, "Repository ${'$'}{targetRepo.name} deleted.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Repository ${targetRepo.name} deleted.", Toast.LENGTH_SHORT).show()
                             },
                             onError = { err ->
                                 isDeleting = false
@@ -614,7 +616,7 @@ fun RepositoryItem(
                 Spacer(modifier = Modifier.height(4.dp))
                 val relativeTime = HomeViewModel.formatRelativeTime(repo.updatedAt)
                 Text(
-                    text = "Branch: ${'$'}{repo.defaultBranch} • Updated: ${'$'}relativeTime",
+                    text = "Branch: ${repo.defaultBranch} • Updated: $relativeTime",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
                 )
