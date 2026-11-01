@@ -11,12 +11,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -67,7 +69,6 @@ fun ProjectScreen(
     var searchQuery by remember { mutableStateOf("") }
     var replaceQuery by remember { mutableStateOf("") }
 
-    // Dropdown menus for Top Bar
     var activeMenu by remember { mutableStateOf<String?>(null) }
 
     ModalNavigationDrawer(
@@ -172,7 +173,6 @@ fun ProjectScreen(
                         )
                     )
 
-                    // Desktop-style Top Menu Bar (File, Edit, View, Build, Git, Settings)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -267,7 +267,6 @@ fun ProjectScreen(
                         }
                     }
 
-                    // Search & Replace Bar
                     AnimatedVisibility(visible = showSearchReplaceBar) {
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceVariant,
@@ -315,7 +314,6 @@ fun ProjectScreen(
                 }
             },
             bottomBar = {
-                // Status Bar
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shadowElevation = 4.dp
@@ -393,7 +391,6 @@ fun ProjectScreen(
                         }
                     }
                 } else {
-                    // Code Editor with Line Numbers
                     CodeEditorView(
                         content = editorContent,
                         fileName = currentFile?.name ?: "",
@@ -404,7 +401,6 @@ fun ProjectScreen(
         }
     }
 
-    // Build Logs Sliding Panel (ModalBottomSheet)
     if (showBuildSheet) {
         ModalBottomSheet(
             onDismissRequest = { showBuildSheet = false },
@@ -441,7 +437,6 @@ fun ProjectScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Build Log Output Terminal
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -498,7 +493,6 @@ fun ProjectScreen(
         }
     }
 
-    // Commit Message Dialog
     if (showCommitDialog) {
         var commitMsg by remember { mutableStateOf("") }
         AlertDialog(
@@ -531,7 +525,6 @@ fun ProjectScreen(
         )
     }
 
-    // New File Dialog
     if (showNewFileDialog) {
         var newFilePath by remember { mutableStateOf("") }
         AlertDialog(
@@ -566,7 +559,6 @@ fun ProjectScreen(
         )
     }
 
-    // Delete Confirmation Dialog
     showDeleteConfirmDialog?.let { target ->
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = null },
@@ -591,7 +583,6 @@ fun ProjectScreen(
         )
     }
 
-    // Branch Switcher Dialog
     if (showBranchDialog) {
         AlertDialog(
             onDismissRequest = { showBranchDialog = false },
@@ -715,7 +706,6 @@ fun CodeEditorView(
             .fillMaxSize()
             .verticalScroll(verticalScroll)
     ) {
-        // Line Numbers Gutter
         Column(
             modifier = Modifier
                 .background(Color(0xFF161616))
@@ -733,7 +723,6 @@ fun CodeEditorView(
             }
         }
 
-        // Code Editor Text Area with Syntax Highlighting Visual Transformation
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -757,9 +746,6 @@ fun CodeEditorView(
     }
 }
 
-/**
- * VisualTransformation providing syntax coloring for Kotlin, Java, XML, JSON, Markdown
- */
 class CodeSyntaxVisualTransformation(private val fileName: String) : VisualTransformation {
 
     private val kotlinKeywords = setOf(
