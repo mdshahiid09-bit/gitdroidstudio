@@ -4,11 +4,17 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.gitdroidstudio.shahid.app.data.model.AccountInfo
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 
 /**
  * Manages GitHub PAT and authentication tokens securely using Android Keystore.
+ * Supports multiple GitHub accounts with switching and removal.
  */
 class AuthManager(context: Context) {
+
+    private val gson = Gson()
 
     private val prefs: SharedPreferences = try {
         val masterKey = MasterKey.Builder(context)
@@ -23,7 +29,6 @@ class AuthManager(context: Context) {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     } catch (e: Exception) {
-        // Fallback for devices/emulators with keystore compatibility quirks
         context.getSharedPreferences("gitdroid_prefs_fallback", Context.MODE_PRIVATE)
     }
 
@@ -36,7 +41,7 @@ class AuthManager(context: Context) {
     }
 
     fun saveUsername(username: String) {
-        prefs.edit().putString(KEY_USERNAME, username).apply()
+        prefs.edit().putString(KEY_USERNAME, username.trim()).apply()
     }
 
     fun getUsername(): String? {
@@ -44,11 +49,65 @@ class AuthManager(context: Context) {
     }
 
     fun saveAvatarUrl(avatarUrl: String) {
-        prefs.edit().putString(KEY_AVATAR, avatarUrl).apply()
+        prefs.edit().putString(KEY_AVATAR, avatarUrl.trim()).apply()
     }
 
     fun getAvatarUrl(): String? {
         return prefs.getString(KEY_AVATAR, null)
+    }
+
+    fun getAccounts(): List<AccountInfo> {
+        val json = prefs.getString(KEY_ACCOUNTS, null) ?: return emptyList()
+        return try {
+            val type = object : TypeToken<List<AccountInfo>>() {}.type
+            gson.fromJson(json, type) ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun addOrUpdateAccount(account: AccountInfo) {
+        val current = getAccounts().toMutableList()
+        val index = current.indexOfFirst { it.username.equals(account.username, ignoreCase = true) }
+        if (index >= 0) {
+            current[index] = account
+        } else {
+            current.add(account)
+        }
+        prefs.edit()
+            .putString(KEY_ACCOUNTS, gson.toJson(current))
+            .putString(KEY_TOKEN, account.token)
+            .putString(KEY_USERNAME, account.username)
+            .putString(KEY_AVATAR, account.avatarUrl ?: "")
+            .apply()
+    }
+
+    fun switchAccount(username: String): Boolean {
+        val account = getAccounts().find { it.username.equals(username, ignoreCase = true) } ?: return false
+        prefs.edit()
+            .putString(KEY_TOKEN, account.token)
+            .putString(KEY_USERNAME, account.username)
+            .putString(KEY_AVATAR, account.avatarUrl ?: "")
+            .apply()
+        return true
+    }
+
+    fun removeAccount(username: String) {
+        val current = getAccounts().toMutableList()
+        current.removeAll { it.username.equals(username, ignoreCase = true) }
+        val editor = prefs.edit().putString(KEY_ACCOUNTS, gson.toJson(current))
+
+        if (getUsername().equals(username, ignoreCase = true)) {
+            val next = current.firstOrNull()
+            if (next != null) {
+                editor.putString(KEY_TOKEN, next.token)
+                    .putString(KEY_USERNAME, next.username)
+                    .putString(KEY_AVATAR, next.avatarUrl ?: "")
+            } else {
+                editor.remove(KEY_TOKEN).remove(KEY_USERNAME).remove(KEY_AVATAR)
+            }
+        }
+        editor.apply()
     }
 
     fun isLoggedIn(): Boolean {
@@ -56,12 +115,18 @@ class AuthManager(context: Context) {
     }
 
     fun logout() {
-        prefs.edit().clear().apply()
+        val currentUser = getUsername()
+        if (!currentUser.isNullOrBlank()) {
+            removeAccount(currentUser)
+        } else {
+            prefs.edit().remove(KEY_TOKEN).remove(KEY_USERNAME).remove(KEY_AVATAR).apply()
+        }
     }
 
     companion object {
         private const val KEY_TOKEN = "github_token"
         private const val KEY_USERNAME = "github_username"
         private const val KEY_AVATAR = "github_avatar_url"
+        private const val KEY_ACCOUNTS = "github_accounts_list"
     }
 }
