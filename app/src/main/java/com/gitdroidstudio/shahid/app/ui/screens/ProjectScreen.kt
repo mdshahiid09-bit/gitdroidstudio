@@ -1,13 +1,16 @@
 package com.gitdroidstudio.shahid.app.ui.screens
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
@@ -60,11 +64,14 @@ fun ProjectScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val fileTree by viewModel.fileTree.collectAsState()
+    val expandedFolders by viewModel.expandedFolders.collectAsState()
     val openTabs by viewModel.openTabs.collectAsState()
     val activeTabIndex by viewModel.activeTabIndex.collectAsState()
     val currentTab = viewModel.currentTab
 
     val statusMessage by viewModel.statusMessage.collectAsState()
+    val lastCommitNotification by viewModel.lastCommitNotification.collectAsState()
+    val apiErrorDialog by viewModel.apiErrorDialog.collectAsState()
     val buildStatus by viewModel.buildStatus.collectAsState()
     val buildLogs by viewModel.buildLogs.collectAsState()
     val workflowSteps by viewModel.workflowSteps.collectAsState()
@@ -76,6 +83,7 @@ fun ProjectScreen(
     val searchResults by viewModel.searchResults.collectAsState()
     val suggestions by viewModel.suggestions.collectAsState()
     val showMissingWorkflowDialog by viewModel.showMissingWorkflowDialog.collectAsState()
+    val showDispatch404Dialog by viewModel.showDispatch404Dialog.collectAsState()
     val workflowDispatchError by viewModel.workflowDispatchError.collectAsState()
 
     var showBuildSheet by remember { mutableStateOf(false) }
@@ -135,6 +143,7 @@ fun ProjectScreen(
                         FileTreeNodeItem(
                             node = node,
                             depth = 0,
+                            expandedFolders = expandedFolders,
                             onNodeClick = { target ->
                                 if (target.isDirectory) {
                                     viewModel.toggleFolder(target)
@@ -410,7 +419,7 @@ fun ProjectScreen(
                                 Surface(
                                     shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
                                     color = if (isSelected) Color(0xFF1E1E1E) else Color(0xFF181818),
-                                    border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF383838)) else null,
+                                    border = if (isSelected) BorderStroke(1.dp, Color(0xFF383838)) else null,
                                     modifier = Modifier.padding(end = 4.dp)
                                 ) {
                                     Row(
@@ -651,11 +660,80 @@ fun ProjectScreen(
                         }
                     }
                 } else {
-                    CodeEditorView(
-                        content = currentTab.content,
-                        fileName = currentTab.file.name,
-                        onContentChange = { viewModel.onContentChanged(it) }
-                    )
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Real-time commit and push success banner
+                        AnimatedVisibility(
+                            visible = lastCommitNotification != null,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            lastCommitNotification?.let { notif ->
+                                Surface(
+                                    color = Color(0xFF1B5E20),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = Color(0xFF81C784),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            val shaShort = if (notif.sha.length >= 7) notif.sha.take(7) else notif.sha
+                                            Text(
+                                                text = "Committed: $shaShort",
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "View Commit ↗",
+                                                color = Color(0xFF90CAF9),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.clickable {
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(notif.commitUrl))
+                                                    context.startActivity(intent)
+                                                }
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { viewModel.dismissCommitNotification() },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Dismiss",
+                                                tint = Color.LightGray,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Code Editor with pinch-to-zoom
+                        Box(modifier = Modifier.weight(1f)) {
+                            CodeEditorView(
+                                content = currentTab.content,
+                                fileName = currentTab.file.name,
+                                onContentChange = { viewModel.onContentChanged(it) }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -930,6 +1008,43 @@ fun ProjectScreen(
         )
     }
 
+    // Workflow Dispatch 404 Dialog
+    if (showDispatch404Dialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissDispatch404Dialog() },
+            title = { Text("Build Workflow (404 Not Found)", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "GitHub Actions returned HTTP 404. This means either:\n\n" +
+                    "1. '.github/workflows/build.yml' is missing on branch '$activeBranch'.\n" +
+                    "2. Your GitHub Personal Access Token lacks the 'workflow' scope.",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.dismissDispatch404Dialog()
+                        viewModel.createWorkflowAndBuild("./gradlew assembleDebug --stacktrace")
+                    }
+                ) {
+                    Text("Add workflow")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        viewModel.dismissDispatch404Dialog()
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/settings/tokens"))
+                        context.startActivity(browserIntent)
+                    }
+                ) {
+                    Text("Check token scope")
+                }
+            }
+        )
+    }
+
     // Workflow Dispatch Error Dialog
     workflowDispatchError?.let { errText ->
         AlertDialog(
@@ -938,6 +1053,28 @@ fun ProjectScreen(
             text = { Text(errText, fontSize = 13.sp) },
             confirmButton = {
                 Button(onClick = { viewModel.dismissWorkflowDispatchError() }) {
+                    Text("Dismiss")
+                }
+            }
+        )
+    }
+
+    // API Error Dialog (status codes 401, 403, 404, etc.)
+    apiErrorDialog?.let { err ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissApiErrorDialog() },
+            title = {
+                Text(
+                    text = if (err.statusCode > 0) "GitHub API Error (HTTP ${err.statusCode})" else "Network Error",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = {
+                Text(text = err.message, fontSize = 13.sp)
+            },
+            confirmButton = {
+                Button(onClick = { viewModel.dismissApiErrorDialog() }) {
                     Text("Dismiss")
                 }
             }
@@ -1342,6 +1479,7 @@ fun ProjectScreen(
 fun FileTreeNodeItem(
     node: FileNode,
     depth: Int,
+    expandedFolders: Set<String>,
     onNodeClick: (FileNode) -> Unit,
     onNewFileInFolder: (String) -> Unit,
     onNewFolderInFolder: (String) -> Unit,
@@ -1349,6 +1487,7 @@ fun FileTreeNodeItem(
     onDelete: (FileNode) -> Unit
 ) {
     var expandedContextMenu by remember { mutableStateOf(false) }
+    val isExpanded = expandedFolders.contains(node.path)
 
     Column {
         Box {
@@ -1368,7 +1507,7 @@ fun FileTreeNodeItem(
                         contentDescription = null,
                         modifier = Modifier
                             .size(16.dp)
-                            .rotate(if (node.isExpanded) 90f else 0f),
+                            .rotate(if (isExpanded) 90f else 0f),
                         tint = Color.Gray
                     )
                     Spacer(modifier = Modifier.width(4.dp))
@@ -1376,7 +1515,7 @@ fun FileTreeNodeItem(
 
                 Icon(
                     imageVector = if (node.isDirectory) {
-                        if (node.isExpanded) Icons.Default.FolderOpen else Icons.Default.Folder
+                        if (isExpanded) Icons.Default.FolderOpen else Icons.Default.Folder
                     } else {
                         when {
                             node.name.endsWith(".kt") -> Icons.Default.Code
@@ -1451,11 +1590,12 @@ fun FileTreeNodeItem(
             }
         }
 
-        if (node.isExpanded && node.children.isNotEmpty()) {
+        if (isExpanded && node.children.isNotEmpty()) {
             node.children.forEach { child ->
                 FileTreeNodeItem(
                     node = child,
                     depth = depth + 1,
+                    expandedFolders = expandedFolders,
                     onNodeClick = onNodeClick,
                     onNewFileInFolder = onNewFileInFolder,
                     onNewFolderInFolder = onNewFolderInFolder,
@@ -1473,6 +1613,21 @@ fun CodeEditorView(
     fileName: String,
     onContentChange: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("editor_prefs", Context.MODE_PRIVATE) }
+    var fontSizeSp by remember {
+        mutableFloatStateOf(prefs.getFloat("font_size_sp", 13f))
+    }
+
+    fun updateFontSize(newSize: Float) {
+        val clamped = newSize.coerceIn(8f, 40f)
+        fontSizeSp = clamped
+        prefs.edit().putFloat("font_size_sp", clamped).apply()
+    }
+
+    val currentFontSize = fontSizeSp.sp
+    val currentLineHeight = (fontSizeSp * 1.385f).sp
+
     val lineCount = remember(content) {
         val lines = content.count { it == '\n' } + 1
         lines.coerceAtLeast(1)
@@ -1481,47 +1636,103 @@ fun CodeEditorView(
     val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(verticalScroll)
-    ) {
-        Column(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Row(
             modifier = Modifier
-                .background(Color(0xFF161616))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.End
+                .fillMaxSize()
+                .verticalScroll(verticalScroll)
+                .pointerInput(Unit) {
+                    detectTransformGestures(panZoomLock = false) { _, _, zoom, _ ->
+                        if (Math.abs(zoom - 1.0f) > 0.01f) {
+                            updateFontSize(fontSizeSp * zoom)
+                        }
+                    }
+                }
         ) {
-            for (i in 1..lineCount) {
-                Text(
-                    text = "$i",
-                    color = Color.DarkGray,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
+            Column(
+                modifier = Modifier
+                    .background(Color(0xFF161616))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                for (i in 1..lineCount) {
+                    Text(
+                        text = "$i",
+                        color = Color.DarkGray,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = currentFontSize,
+                        lineHeight = currentLineHeight
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(horizontalScroll)
+                    .padding(8.dp)
+            ) {
+                BasicTextField(
+                    value = content,
+                    onValueChange = onContentChange,
+                    textStyle = TextStyle(
+                        color = Color(0xFFD4D4D4),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = currentFontSize,
+                        lineHeight = currentLineHeight
+                    ),
+                    cursorBrush = SolidColor(Color.White),
+                    visualTransformation = remember(fileName) { CodeSyntaxVisualTransformation(fileName) },
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
 
-        Box(
+        // Floating Zoom Controls (Fallback & indicator)
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = Color(0xFF252525).copy(alpha = 0.9f),
+            border = BorderStroke(1.dp, Color(0xFF383838)),
             modifier = Modifier
-                .weight(1f)
-                .horizontalScroll(horizontalScroll)
-                .padding(8.dp)
+                .align(Alignment.BottomEnd)
+                .padding(end = 12.dp, bottom = 12.dp)
         ) {
-            BasicTextField(
-                value = content,
-                onValueChange = onContentChange,
-                textStyle = TextStyle(
-                    color = Color(0xFFD4D4D4),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                ),
-                cursorBrush = SolidColor(Color.White),
-                visualTransformation = remember(fileName) { CodeSyntaxVisualTransformation(fileName) },
-                modifier = Modifier.fillMaxWidth()
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            ) {
+                IconButton(
+                    onClick = { updateFontSize(fontSizeSp - 1f) },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Remove,
+                        contentDescription = "Zoom Out",
+                        tint = Color.LightGray,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Text(
+                    text = "${fontSizeSp.toInt()}sp",
+                    fontSize = 11.sp,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickable { updateFontSize(13f) }
+                        .padding(horizontal = 4.dp)
+                )
+                IconButton(
+                    onClick = { updateFontSize(fontSizeSp + 1f) },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Zoom In",
+                        tint = Color.LightGray,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         }
     }
 }
