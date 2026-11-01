@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gitdroidstudio.shahid.app.data.api.GitHubApiService
+import com.gitdroidstudio.shahid.app.data.auth.AuthManager
 import com.gitdroidstudio.shahid.app.data.model.CreateRepoRequest
 import com.gitdroidstudio.shahid.app.data.model.FileContentUpdate
 import com.gitdroidstudio.shahid.app.data.model.Repository
@@ -14,6 +15,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+
+enum class RepoSort {
+    UPDATED,
+    NAME
+}
 
 sealed class HomeUiState {
     object Loading : HomeUiState()
@@ -26,15 +32,23 @@ sealed class HomeUiState {
 }
 
 class HomeViewModel(
-    private val apiService: GitHubApiService
+    private val apiService: GitHubApiService,
+    private val authManager: AuthManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    private val _sortOption = MutableStateFlow(RepoSort.UPDATED)
+    val sortOption: StateFlow<RepoSort> = _sortOption.asStateFlow()
+
+    private val _pinnedRepos = MutableStateFlow<Set<String>>(emptySet())
+    val pinnedRepos: StateFlow<Set<String>> = _pinnedRepos.asStateFlow()
+
     private var cachedRepos = listOf<Repository>()
 
     init {
+        _pinnedRepos.value = authManager.getPinnedRepos()
         loadRepositories()
     }
 
@@ -62,35 +76,149 @@ class HomeViewModel(
                     } else {
                         hasMore = false
                         if (allFetched.isEmpty()) {
-                            _uiState.value = HomeUiState.Error("Failed to fetch repositories (HTTP ${response.code()})")
+                            _uiState.value = HomeUiState.Error("Failed to fetch repositories (HTTP ${'$'}{response.code()})")
                             return@launch
                         }
                     }
                 }
 
                 cachedRepos = allFetched
-                _uiState.value = HomeUiState.Success(
-                    allRepos = cachedRepos,
-                    filteredRepos = cachedRepos
-                )
+                applySortAndFilter(searchQuery = (_uiState.value as? HomeUiState.Success)?.searchQuery ?: "")
             } catch (e: Exception) {
                 _uiState.value = HomeUiState.Error(e.localizedMessage ?: "Failed to connect to GitHub")
             }
         }
     }
 
+    fun toggleSort() {
+        _sortOption.value = if (_sortOption.value == RepoSort.UPDATED) RepoSort.NAME else RepoSort.UPDATED
+        val currentQuery = (_uiState.value as? HomeUiState.Success)?.searchQuery ?: ""
+        applySortAndFilter(currentQuery)
+    }
+
+    fun togglePin(repoFullName: String) {
+        authManager.togglePinRepo(repoFullName)
+        _pinnedRepos.value = authManager.getPinnedRepos()
+        val currentQuery = (_uiState.value as? HomeUiState.Success)?.searchQuery ?: ""
+        applySortAndFilter(currentQuery)
+    }
+
+    fun isRepoPinned(repoFullName: String): Boolean {
+        return _pinnedRepos.value.contains(repoFullName)
+    }
+
     fun onSearchQueryChanged(query: String) {
-        val currentState = _uiState.value
-        if (currentState is HomeUiState.Success) {
-            val filtered = if (query.isBlank()) {
-                cachedRepos
-            } else {
-                cachedRepos.filter {
-                    it.name.contains(query, ignoreCase = true) ||
-                    (it.description?.contains(query, ignoreCase = true) == true)
+        applySortAndFilter(query)
+    }
+
+    private fun applySortAndFilter(searchQuery: String) {
+        val filtered = if (searchQuery.isBlank()) {
+            cachedRepos
+        } else {
+            cachedRepos.filter {
+                it.name.contains(searchQuery, ignoreCase = true) ||
+                (it.description?.contains(searchQuery, ignoreCase = true) == true)
+            }
+        }
+
+        val pinned = _pinnedRepos.value
+        val sorted = filtered.sortedWith(
+            compareBy<Repository> { repo ->
+                // Pinned repos first: if pinned, return 0; else 1
+                if (pinned.contains(repo.fullName)) 0 else 1
+            }.thenComparator { a, b ->
+                when (_sortOption.value) {
+                    RepoSort.UPDATED -> {
+                        // Newest date first
+                        (b.updatedAt ?: "").compareTo(a.updatedAt ?: "")
+                    }
+                    RepoSort.NAME -> {
+                        a.name.lowercase().compareTo(b.name.lowercase())
+                    }
                 }
             }
-            _uiState.value = currentState.copy(filteredRepos = filtered, searchQuery = query)
+        )
+
+        _uiState.value = HomeUiState.Success(
+            allRepos = cachedRepos,
+            filteredRepos = sorted,
+            searchQuery = searchQuery
+        )
+    }
+
+    fun renameRepo(
+        owner: String,
+        oldName: String,
+        newName: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val cleanNewName = newName.trim()
+                val response = apiService.updateRepository(
+                    owner = owner,
+                    repo = oldName,
+                    body = mapOf("name" to cleanNewName)
+                )
+                if (response.isSuccessful) {
+                    loadRepositories()
+                    onSuccess()
+                } else {
+                    onError("Failed to rename repository (HTTP ${'$'}{response.code()}: ${'$'}{response.message()})")
+                }
+            } catch (e: Exception) {
+                onError(e.localizedMessage ?: "Failed to rename repository")
+            }
+        }
+    }
+
+    fun changeVisibility(
+        owner: String,
+        repo: String,
+        isPrivate: Boolean,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.updateRepository(
+                    owner = owner,
+                    repo = repo,
+                    body = mapOf("private" to isPrivate)
+                )
+                if (response.isSuccessful) {
+                    loadRepositories()
+                    onSuccess()
+                } else {
+                    onError("Failed to change visibility (HTTP ${'$'}{response.code()}: ${'$'}{response.message()})")
+                }
+            } catch (e: Exception) {
+                onError(e.localizedMessage ?: "Failed to change visibility")
+            }
+        }
+    }
+
+    fun deleteRepo(
+        owner: String,
+        repo: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.deleteRepository(owner = owner, repo = repo)
+                if (response.isSuccessful || response.code() == 204) {
+                    loadRepositories()
+                    onSuccess()
+                } else if (response.code() == 403) {
+                    onError("Forbidden (HTTP 403): Personal Access Token requires 'delete_repo' scope to delete repositories on GitHub.")
+                } else {
+                    onError("Failed to delete repository (HTTP ${'$'}{response.code()}: ${'$'}{response.message()})")
+                }
+            } catch (e: Exception) {
+                onError(e.localizedMessage ?: "Failed to delete repository")
+            }
         }
     }
 
@@ -117,7 +245,7 @@ class HomeViewModel(
                     loadRepositories()
                     onSuccess(newRepo)
                 } else {
-                    onError("Failed to create repo: HTTP ${response.code()} ${response.message()}")
+                    onError("Failed to create repo: HTTP ${'$'}{response.code()} ${'$'}{response.message()}")
                 }
             } catch (e: Exception) {
                 onError(e.localizedMessage ?: "Network error creating project")
@@ -148,17 +276,17 @@ class HomeViewModel(
                         val dummyRepo = Repository(
                             id = System.currentTimeMillis(),
                             name = cleanRepo,
-                            fullName = "$cleanOwner/$cleanRepo",
+                            fullName = "${'$'}cleanOwner/${'$'}cleanRepo",
                             description = null,
                             private = false,
-                            htmlUrl = "https://github.com/$cleanOwner/$cleanRepo",
+                            htmlUrl = "https://github.com/${'$'}cleanOwner/${'$'}cleanRepo",
                             defaultBranch = "main",
                             updatedAt = null,
                             owner = null
                         )
                         onSuccess(dummyRepo)
                     } else {
-                        onError("Repository $cleanOwner/$cleanRepo not found or accessible.")
+                        onError("Repository ${'$'}cleanOwner/${'$'}cleanRepo not found or accessible.")
                     }
                 }
             } catch (e: Exception) {
@@ -318,7 +446,7 @@ class HomeViewModel(
                     repo = repo,
                     path = path,
                     body = FileContentUpdate(
-                        message = "Initialize $path for $template",
+                        message = "Initialize ${'$'}path for ${'$'}template",
                         content = encoded
                     )
                 )

@@ -25,6 +25,7 @@ import com.gitdroidstudio.shahid.app.data.model.Repository
 import com.gitdroidstudio.shahid.app.ui.dialogs.CreateProjectDialog
 import com.gitdroidstudio.shahid.app.ui.viewmodel.HomeUiState
 import com.gitdroidstudio.shahid.app.ui.viewmodel.HomeViewModel
+import com.gitdroidstudio.shahid.app.ui.viewmodel.RepoSort
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,8 +38,16 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val sortOption by viewModel.sortOption.collectAsState()
+    val pinnedRepos by viewModel.pinnedRepos.collectAsState()
+
     var showCreateDialog by remember { mutableStateOf(false) }
     var showOpenRepoDialog by remember { mutableStateOf(false) }
+
+    // Repo action dialogs
+    var repoToRename by remember { mutableStateOf<Repository?>(null) }
+    var repoToChangeVisibility by remember { mutableStateOf<Repository?>(null) }
+    var repoToDelete by remember { mutableStateOf<Repository?>(null) }
 
     Scaffold(
         topBar = {
@@ -106,7 +115,7 @@ fun HomeScreen(
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
                     Text(
-                        text = "Welcome, ${currentUsername ?: "Developer"} 👋",
+                        text = "Welcome, ${'$'}{currentUsername ?: "Developer"} 👋",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -158,14 +167,38 @@ fun HomeScreen(
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            Text(
-                text = "Your Repositories",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-            )
+            // Section Header with Sort Toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Your Repositories",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
+                )
+
+                TextButton(
+                    onClick = { viewModel.toggleSort() },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Sort,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (sortOption == RepoSort.UPDATED) "Sort: Updated" else "Sort: Name",
+                        fontSize = 12.sp
+                    )
+                }
+            }
 
             // Content List
             when (val state = uiState) {
@@ -207,15 +240,21 @@ fun HomeScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(state.filteredRepos, key = { it.id }) { repo ->
+                                val isPinned = pinnedRepos.contains(repo.fullName)
                                 RepositoryItem(
                                     repo = repo,
+                                    isPinned = isPinned,
                                     onClick = {
                                         onOpenRepo(
                                             repo.owner?.login ?: "",
                                             repo.name,
                                             repo.defaultBranch
                                         )
-                                    }
+                                    },
+                                    onTogglePin = { viewModel.togglePin(repo.fullName) },
+                                    onRename = { repoToRename = repo },
+                                    onChangeVisibility = { repoToChangeVisibility = repo },
+                                    onDelete = { repoToDelete = repo }
                                 )
                             }
                         }
@@ -250,7 +289,7 @@ fun HomeScreen(
         )
     }
 
-    // Real Open Repository Picker Dialog (STEP 4)
+    // Real Open Repository Picker Dialog
     if (showOpenRepoDialog) {
         var ownerInput by remember { mutableStateOf(currentUsername ?: "") }
         var repoInput by remember { mutableStateOf("") }
@@ -311,13 +350,199 @@ fun HomeScreen(
             }
         )
     }
+
+    // Rename Repository Dialog (STEP 4)
+    repoToRename?.let { targetRepo ->
+        var newRepoName by remember { mutableStateOf(targetRepo.name) }
+        var isSubmitting by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { repoToRename = null },
+            title = { Text("Rename Repository", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Enter a new name for repository ${'$'}{targetRepo.name}:", fontSize = 13.sp)
+                    OutlinedTextField(
+                        value = newRepoName,
+                        onValueChange = { newRepoName = it.filter { c -> c.isLetterOrDigit() || c == '-' || c == '_' } },
+                        label = { Text("New Repository Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isSubmitting = true
+                        val ownerLogin = targetRepo.owner?.login ?: currentUsername ?: ""
+                        viewModel.renameRepo(
+                            owner = ownerLogin,
+                            oldName = targetRepo.name,
+                            newName = newRepoName,
+                            onSuccess = {
+                                isSubmitting = false
+                                repoToRename = null
+                                Toast.makeText(context, "Repository renamed to ${'$'}newRepoName", Toast.LENGTH_SHORT).show()
+                            },
+                            onError = { err ->
+                                isSubmitting = false
+                                Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    },
+                    enabled = newRepoName.isNotBlank() && newRepoName != targetRepo.name && !isSubmitting
+                ) {
+                    Text(if (isSubmitting) "Renaming..." else "Rename")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { repoToRename = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Change Visibility Dialog (STEP 4)
+    repoToChangeVisibility?.let { targetRepo ->
+        var isSubmitting by remember { mutableStateOf(false) }
+        val targetIsPrivate = !targetRepo.private
+
+        AlertDialog(
+            onDismissRequest = { repoToChangeVisibility = null },
+            title = {
+                Text(
+                    if (targetIsPrivate) "Make Repository Private?" else "Make Repository Public?",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    if (targetIsPrivate) {
+                        "Only you and authorized collaborators will be able to view this repository on GitHub."
+                    } else {
+                        "⚠️ WARNING: Making this repository PUBLIC will allow ANYONE on GitHub to view, clone, and fork your code."
+                    },
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isSubmitting = true
+                        val ownerLogin = targetRepo.owner?.login ?: currentUsername ?: ""
+                        viewModel.changeVisibility(
+                            owner = ownerLogin,
+                            repo = targetRepo.name,
+                            isPrivate = targetIsPrivate,
+                            onSuccess = {
+                                isSubmitting = false
+                                repoToChangeVisibility = null
+                                Toast.makeText(
+                                    context,
+                                    "Repository is now ${'$'}{if (targetIsPrivate) "Private" else "Public"}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onError = { err ->
+                                isSubmitting = false
+                                Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    },
+                    enabled = !isSubmitting,
+                    colors = if (!targetIsPrivate) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                             else ButtonDefaults.buttonColors()
+                ) {
+                    Text(if (isSubmitting) "Updating..." else if (targetIsPrivate) "Make Private" else "Make Public")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { repoToChangeVisibility = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Exact-Name Confirmation Delete Dialog (STEP 4)
+    repoToDelete?.let { targetRepo ->
+        var confirmationName by remember { mutableStateOf("") }
+        var isDeleting by remember { mutableStateOf(false) }
+        val isNameMatched = confirmationName.trim() == targetRepo.name
+
+        AlertDialog(
+            onDismissRequest = { repoToDelete = null },
+            title = {
+                Text("Delete Repository?", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "This action CANNOT be undone. This will permanently delete the repository '${'$'}{targetRepo.fullName}', including all commits, branches, issues, and workflows.",
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = "To confirm, please type the exact repository name '${'$'}{targetRepo.name}' below:",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    OutlinedTextField(
+                        value = confirmationName,
+                        onValueChange = { confirmationName = it },
+                        placeholder = { Text(targetRepo.name) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isDeleting = true
+                        val ownerLogin = targetRepo.owner?.login ?: currentUsername ?: ""
+                        viewModel.deleteRepo(
+                            owner = ownerLogin,
+                            repo = targetRepo.name,
+                            onSuccess = {
+                                isDeleting = false
+                                repoToDelete = null
+                                Toast.makeText(context, "Repository ${'$'}{targetRepo.name} deleted.", Toast.LENGTH_SHORT).show()
+                            },
+                            onError = { err ->
+                                isDeleting = false
+                                Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    },
+                    enabled = isNameMatched && !isDeleting,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(if (isDeleting) "Deleting..." else "Delete Repository")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { repoToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun RepositoryItem(
     repo: Repository,
-    onClick: () -> Unit
+    isPinned: Boolean,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onRename: () -> Unit,
+    onChangeVisibility: () -> Unit,
+    onDelete: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -364,6 +589,16 @@ fun RepositoryItem(
                         },
                         modifier = Modifier.height(22.dp)
                     )
+
+                    if (isPinned) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = "Pinned",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
 
                 if (!repo.description.isNullOrBlank()) {
@@ -379,17 +614,68 @@ fun RepositoryItem(
                 Spacer(modifier = Modifier.height(4.dp))
                 val relativeTime = HomeViewModel.formatRelativeTime(repo.updatedAt)
                 Text(
-                    text = "Branch: ${repo.defaultBranch} • Updated: $relativeTime",
+                    text = "Branch: ${'$'}{repo.defaultBranch} • Updated: ${'$'}relativeTime",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
                 )
             }
 
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-            )
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Repo actions",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Open Project") },
+                        leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            onClick()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (isPinned) "Unpin from Top" else "Pin to Top") },
+                        leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            onTogglePin()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            onRename()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (repo.private) "Make Public" else "Make Private") },
+                        leadingIcon = { Icon(if (repo.private) Icons.Default.LockOpen else Icons.Default.Lock, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            onChangeVisibility()
+                        }
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Delete Repository", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                        onClick = {
+                            showMenu = false
+                            onDelete()
+                        }
+                    )
+                }
+            }
         }
     }
 }
