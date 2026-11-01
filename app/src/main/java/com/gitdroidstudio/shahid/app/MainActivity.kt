@@ -15,7 +15,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.gitdroidstudio.shahid.app.data.api.GitHubApiService
 import com.gitdroidstudio.shahid.app.data.auth.AuthManager
-import com.gitdroidstudio.shahid.app.data.model.AccountInfo
 import com.gitdroidstudio.shahid.app.ui.screens.*
 import com.gitdroidstudio.shahid.app.ui.theme.GitDroidStudioTheme
 import com.gitdroidstudio.shahid.app.ui.viewmodel.AuthViewModel
@@ -81,7 +80,7 @@ class MainActivity : ComponentActivity() {
                         composable("home") {
                             val homeViewModel = remember {
                                 val api = GitHubApiService.create { authManager.getToken() }
-                                HomeViewModel(api)
+                                HomeViewModel(api, authManager)
                             }
 
                             HomeScreen(
@@ -89,7 +88,7 @@ class MainActivity : ComponentActivity() {
                                 currentUserAvatar = authManager.getAvatarUrl(),
                                 currentUsername = authManager.getUsername(),
                                 onOpenRepo = { owner, repo, branch ->
-                                    navController.navigate("project/$owner/$repo/$branch")
+                                    navController.navigate("project/${'$'}owner/${'$'}repo/${'$'}branch")
                                 },
                                 onOpenSettings = {
                                     navController.navigate("settings")
