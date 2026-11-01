@@ -22,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +43,7 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gitdroidstudio.shahid.app.model.BuildStatus
 import com.gitdroidstudio.shahid.app.ui.viewmodel.*
 import kotlinx.coroutines.launch
 
@@ -98,7 +101,7 @@ fun ProjectScreen(
 
     // Haptic feedback on build events
     LaunchedEffect(buildStatus) {
-        if (buildStatus == BuildStatus.RUNNING || buildStatus == BuildStatus.SUCCESS || buildStatus == BuildStatus.FAILURE) {
+        if (buildStatus is BuildStatus.InProgress || buildStatus is BuildStatus.Success || buildStatus is BuildStatus.Failure) {
             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
         }
     }
@@ -179,7 +182,7 @@ fun ProjectScreen(
                                     maxLines = 1
                                 )
                                 Text(
-                                    text = "branch: ${'$'}activeBranch",
+                                    text = "branch: $activeBranch",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -473,7 +476,7 @@ fun ProjectScreen(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     if (searchQuery.isNotEmpty()) {
                                         Text(
-                                            text = "${'$'}matchCount found",
+                                            text = "$matchCount found",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.primary
                                         )
@@ -592,13 +595,21 @@ fun ProjectScreen(
                                     onClick = { showBuildSheet = true },
                                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                                 ) {
+                                    val statusName = when (buildStatus) {
+                                        is BuildStatus.Idle -> "Idle"
+                                        is BuildStatus.Queued -> "Queued"
+                                        is BuildStatus.InProgress -> "Running"
+                                        is BuildStatus.Success -> "Success"
+                                        is BuildStatus.Failure -> "Failure"
+                                    }
                                     Text(
-                                        text = "Build: ${'$'}{buildStatus.name}",
+                                        text = "Build: $statusName",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = when (buildStatus) {
-                                            BuildStatus.RUNNING -> MaterialTheme.colorScheme.primary
-                                            BuildStatus.SUCCESS -> Color(0xFF27AE60)
-                                            BuildStatus.FAILURE -> MaterialTheme.colorScheme.error
+                                            is BuildStatus.InProgress -> MaterialTheme.colorScheme.primary
+                                            is BuildStatus.Queued -> MaterialTheme.colorScheme.tertiary
+                                            is BuildStatus.Success -> Color(0xFF27AE60)
+                                            is BuildStatus.Failure -> MaterialTheme.colorScheme.error
                                             else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                         }
                                     )
@@ -680,7 +691,7 @@ fun ProjectScreen(
                         )
                     }
 
-                    if (buildStatus == BuildStatus.RUNNING) {
+                    if (buildStatus is BuildStatus.InProgress || buildStatus is BuildStatus.Queued) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     }
                 }
@@ -692,7 +703,7 @@ fun ProjectScreen(
                         items(workflowSteps) { step ->
                             SuggestionChip(
                                 onClick = {},
-                                label = { Text("${'$'}{step.name}: ${'$'}{step.conclusion ?: step.status}", fontSize = 10.sp) },
+                                label = { Text("${step.name}: ${step.conclusion ?: step.status}", fontSize = 10.sp) },
                                 colors = SuggestionChipDefaults.suggestionChipColors(
                                     containerColor = if (step.conclusion == "success") Color(0xFF1B5E20) else Color(0xFF282828)
                                 )
@@ -732,7 +743,7 @@ fun ProjectScreen(
                 ) {
                     Button(
                         onClick = { viewModel.triggerBuild() },
-                        enabled = buildStatus != BuildStatus.RUNNING,
+                        enabled = buildStatus !is BuildStatus.InProgress && buildStatus !is BuildStatus.Queued,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
@@ -774,8 +785,9 @@ fun ProjectScreen(
         AlertDialog(
             onDismissRequest = { showDiffDialog = false },
             title = {
+                val diffTitle = "Git Diff: " + (currentTab?.file?.name ?: "No file")
                 Text(
-                    text = "Git Diff: ${'$'}{currentTab?.file?.name ?: "No file"}",
+                    text = diffTitle,
                     fontWeight = FontWeight.Bold
                 )
             },
@@ -868,7 +880,7 @@ fun ProjectScreen(
                     onClick = {
                         val num = lineInput.toIntOrNull()
                         if (num != null) {
-                            Toast.makeText(context, "Navigating to line ${'$'}num", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Navigating to line $num", Toast.LENGTH_SHORT).show()
                             showGoToLineDialog = false
                         }
                     }
@@ -958,10 +970,11 @@ fun ProjectScreen(
             onDismissRequest = { showCommitDialog = false },
             title = { Text("Commit & Push Changes") },
             text = {
+                val placeholderText = "Update " + (currentTab?.file?.name ?: "file")
                 OutlinedTextField(
                     value = commitMsg,
                     onValueChange = { commitMsg = it },
-                    placeholder = { Text("Update ${'$'}{currentTab?.file?.name ?: "file"}") },
+                    placeholder = { Text(placeholderText) },
                     label = { Text("Commit Message") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -994,7 +1007,7 @@ fun ProjectScreen(
                 OutlinedTextField(
                     value = fileName,
                     onValueChange = { fileName = it },
-                    placeholder = { Text(if (basePath.isEmpty()) "app/src/main/Example.kt" else "${'$'}basePath/NewFile.kt") },
+                    placeholder = { Text(if (basePath.isEmpty()) "app/src/main/Example.kt" else "$basePath/NewFile.kt") },
                     label = { Text("File Path") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1003,7 +1016,7 @@ fun ProjectScreen(
                 Button(
                     onClick = {
                         if (fileName.isNotBlank()) {
-                            val fullPath = if (basePath.isEmpty()) fileName else "${'$'}basePath/${'$'}fileName"
+                            val fullPath = if (basePath.isEmpty()) fileName else "$basePath/$fileName"
                             viewModel.createFile(fullPath)
                             showNewFileDialog = null
                         }
@@ -1039,7 +1052,7 @@ fun ProjectScreen(
                 Button(
                     onClick = {
                         if (folderName.isNotBlank()) {
-                            val fullPath = if (basePath.isEmpty()) folderName else "${'$'}basePath/${'$'}folderName"
+                            val fullPath = if (basePath.isEmpty()) folderName else "$basePath/$folderName"
                             viewModel.createFolder(fullPath)
                             showNewFolderDialog = null
                         }
@@ -1061,7 +1074,7 @@ fun ProjectScreen(
         var newPath by remember { mutableStateOf(node.path) }
         AlertDialog(
             onDismissRequest = { showRenameDialog = null },
-            title = { Text("Rename ${'$'}{node.name}") },
+            title = { Text("Rename ${node.name}") },
             text = {
                 OutlinedTextField(
                     value = newPath,
@@ -1092,7 +1105,7 @@ fun ProjectScreen(
     showDeleteConfirmDialog?.let { target ->
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = null },
-            title = { Text("Delete ${'$'}{target.name}?") },
+            title = { Text("Delete ${target.name}?") },
             text = {
                 Text(
                     if (target.isDirectory) "Are you sure you want to delete this folder and ALL files inside it? This will push deletion commits to GitHub."
@@ -1217,15 +1230,16 @@ fun ProjectScreen(
                         items(pullRequests) { pr ->
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(10.dp)) {
-                                    Text("#${'$'}{pr.number}: ${'$'}{pr.title}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text("By: ${'$'}{pr.user?.login ?: "user"}", fontSize = 11.sp, color = Color.Gray)
+                                    val prAuthor = pr.user?.login ?: "user"
+                                    Text("#${pr.number}: ${pr.title}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("By: $prAuthor", fontSize = 11.sp, color = Color.Gray)
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Button(
                                         onClick = { viewModel.mergePullRequest(pr.number) },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6F42C1)),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text("Merge PR #${'$'}{pr.number}")
+                                        Text("Merge PR #${pr.number}")
                                     }
                                 }
                             }
@@ -1246,7 +1260,7 @@ fun ProjectScreen(
     if (showRepoSearchModal) {
         AlertDialog(
             onDismissRequest = { showRepoSearchModal = false },
-            title = { Text("Search Code in ${'$'}repo") },
+            title = { Text("Search Code in $repo") },
             text = {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1300,7 +1314,7 @@ fun ProjectScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    viewModel.insertSymbol("\n${'$'}code\n")
+                                    viewModel.insertSymbol("\n$code\n")
                                     showSnippetsModal = false
                                 }
                         ) {
@@ -1525,7 +1539,8 @@ class CodeSyntaxVisualTransformation(private val fileName: String) : VisualTrans
         val builder = buildAnnotatedString {
             append(raw)
 
-            val keywordPattern = "\\b(${'$'}{kotlinKeywords.joinToString("|")})\\b".toRegex()
+            val patternString = "\\b(" + kotlinKeywords.joinToString("|") + ")\\b"
+            val keywordPattern = Regex(patternString)
             for (match in keywordPattern.findAll(raw)) {
                 addStyle(
                     SpanStyle(color = Color(0xFFC586C0), fontWeight = FontWeight.SemiBold),
@@ -1534,7 +1549,7 @@ class CodeSyntaxVisualTransformation(private val fileName: String) : VisualTrans
                 )
             }
 
-            val stringPattern = "\"[^\"]*\"".toRegex()
+            val stringPattern = Regex("\"[^\"]*\"")
             for (match in stringPattern.findAll(raw)) {
                 addStyle(
                     SpanStyle(color = Color(0xFFCE9178)),
@@ -1543,7 +1558,7 @@ class CodeSyntaxVisualTransformation(private val fileName: String) : VisualTrans
                 )
             }
 
-            val commentPattern = "//.*".toRegex()
+            val commentPattern = Regex("//.*")
             for (match in commentPattern.findAll(raw)) {
                 addStyle(
                     SpanStyle(color = Color(0xFF6A9955)),
