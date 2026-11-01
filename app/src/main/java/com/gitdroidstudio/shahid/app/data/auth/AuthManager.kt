@@ -9,8 +9,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 
 /**
- * Manages GitHub PAT and authentication tokens securely using Android Keystore.
- * Supports multiple GitHub accounts with switching and removal.
+ * Manages GitHub PAT, multiple accounts, and pinned repositories securely.
  */
 class AuthManager(context: Context) {
 
@@ -110,6 +109,26 @@ class AuthManager(context: Context) {
         editor.apply()
     }
 
+    fun getPinnedRepos(): Set<String> {
+        return prefs.getStringSet(KEY_PINNED_REPOS, emptySet()) ?: emptySet()
+    }
+
+    fun togglePinRepo(repoFullName: String): Boolean {
+        val current = getPinnedRepos().toMutableSet()
+        val wasPinned = current.contains(repoFullName)
+        if (wasPinned) {
+            current.remove(repoFullName)
+        } else {
+            current.add(repoFullName)
+        }
+        prefs.edit().putStringSet(KEY_PINNED_REPOS, current).apply()
+        return !wasPinned
+    }
+
+    fun isRepoPinned(repoFullName: String): Boolean {
+        return getPinnedRepos().contains(repoFullName)
+    }
+
     fun isLoggedIn(): Boolean {
         return !getToken().isNullOrBlank()
     }
@@ -128,5 +147,6 @@ class AuthManager(context: Context) {
         private const val KEY_USERNAME = "github_username"
         private const val KEY_AVATAR = "github_avatar_url"
         private const val KEY_ACCOUNTS = "github_accounts_list"
+        private const val KEY_PINNED_REPOS = "github_pinned_repos"
     }
 }

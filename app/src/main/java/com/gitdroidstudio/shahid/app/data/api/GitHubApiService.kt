@@ -28,6 +28,19 @@ interface GitHubApiService {
         @Body request: CreateRepoRequest
     ): Response<Repository>
 
+    @PATCH("repos/{owner}/{repo}")
+    suspend fun updateRepository(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Repository>
+
+    @DELETE("repos/{owner}/{repo}")
+    suspend fun deleteRepository(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String
+    ): Response<ResponseBody>
+
     @GET("repos/{owner}/{repo}/git/trees/{tree_sha}")
     suspend fun getGitTree(
         @Path("owner") owner: String,
