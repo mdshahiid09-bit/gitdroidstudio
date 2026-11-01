@@ -3,7 +3,6 @@ package com.gitdroidstudio.shahid.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -16,6 +15,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.gitdroidstudio.shahid.app.data.api.GitHubApiService
 import com.gitdroidstudio.shahid.app.data.auth.AuthManager
+import com.gitdroidstudio.shahid.app.data.model.AccountInfo
 import com.gitdroidstudio.shahid.app.ui.screens.*
 import com.gitdroidstudio.shahid.app.ui.theme.GitDroidStudioTheme
 import com.gitdroidstudio.shahid.app.ui.viewmodel.AuthViewModel
@@ -128,8 +128,11 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable("settings") {
+                            val api = remember { GitHubApiService.create { authManager.getToken() } }
+
                             SettingsScreen(
                                 authManager = authManager,
+                                apiService = api,
                                 isDarkTheme = isDarkTheme,
                                 onToggleDarkTheme = { isDarkTheme = it },
                                 onNavigateBack = { navController.popBackStack() },
