@@ -1,5 +1,6 @@
 package com.gitdroidstudio.shahid.app.ui.viewmodel
 
+import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gitdroidstudio.shahid.app.data.api.GitHubApiService
@@ -10,7 +11,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.Base64
 
 sealed class HomeUiState {
     object Loading : HomeUiState()
@@ -126,7 +126,7 @@ class HomeViewModel(
                           path: app/build/outputs/apk/debug/*.apk
             """.trimIndent()
 
-            val encodedWorkflow = Base64.getEncoder().encodeToString(defaultWorkflow.toByteArray())
+            val encodedWorkflow = Base64.encodeToString(defaultWorkflow.toByteArray(), Base64.NO_WRAP)
             apiService.createOrUpdateFile(
                 owner = owner,
                 repo = repo,

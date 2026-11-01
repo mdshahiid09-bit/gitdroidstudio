@@ -1,6 +1,7 @@
 package com.gitdroidstudio.shahid.app.ui.viewmodel
 
 import android.content.Context
+import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gitdroidstudio.shahid.app.data.api.GitHubApiService
@@ -13,7 +14,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.Base64
 
 data class FileNode(
     val name: String,
@@ -124,7 +124,7 @@ class ProjectViewModel(
                 } catch (_: Exception) {
                 } finally {
                     node.isLoading = false
-                    _fileTree.value = _fileTree.value.toList() // trigger recomposition
+                    _fileTree.value = _fileTree.value.toList()
                 }
             }
         } else {
@@ -143,7 +143,7 @@ class ProjectViewModel(
                     val decoded = if (file.content != null) {
                         try {
                             val cleanBase64 = file.content.replace("\n", "").replace("\r", "")
-                            String(Base64.getDecoder().decode(cleanBase64))
+                            String(Base64.decode(cleanBase64, Base64.DEFAULT))
                         } catch (_: Exception) {
                             file.content
                         }
@@ -173,7 +173,7 @@ class ProjectViewModel(
             _statusMessage.value = "Pushing commit to GitHub..."
             try {
                 val message = commitMessage?.ifBlank { "Update ${file.name}" } ?: "Update ${file.name}"
-                val encodedContent = Base64.getEncoder().encodeToString(_editorContent.value.toByteArray())
+                val encodedContent = Base64.encodeToString(_editorContent.value.toByteArray(), Base64.NO_WRAP)
 
                 val updateReq = FileContentUpdate(
                     message = message,
@@ -186,7 +186,6 @@ class ProjectViewModel(
                 if (response.isSuccessful) {
                     _isModified.value = false
                     _statusMessage.value = "Committed & Pushed successfully! 🚀"
-                    // refresh file SHA
                     val refFile = apiService.getSingleFile(owner, repo, file.path, _activeBranch.value)
                     if (refFile.isSuccessful) {
                         _currentFile.value = refFile.body()
@@ -203,7 +202,7 @@ class ProjectViewModel(
     fun createFile(filePath: String, initialContent: String = "") {
         viewModelScope.launch {
             try {
-                val encoded = Base64.getEncoder().encodeToString(initialContent.toByteArray())
+                val encoded = Base64.encodeToString(initialContent.toByteArray(), Base64.NO_WRAP)
                 val response = apiService.createOrUpdateFile(
                     owner = owner,
                     repo = repo,
@@ -299,11 +298,10 @@ class ProjectViewModel(
                             val job = jobsResp.body()!!.jobs.first()
                             _buildLogs.value += "Job: ${job.name} -> Status: ${job.status}\n"
 
-                            // Stream latest logs
                             val logsResp = apiService.getJobLogs(owner, repo, job.id)
                             if (logsResp.isSuccessful && logsResp.body() != null) {
                                 val logText = logsResp.body()!!.string()
-                                _buildLogs.value = logText.takeLast(15000) // keep last 15KB for performance
+                                _buildLogs.value = logText.takeLast(15000)
                             }
                         }
 
