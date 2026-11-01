@@ -19,6 +19,7 @@ interface GitHubApiService {
     suspend fun getUserRepositories(
         @Query("sort") sort: String = "updated",
         @Query("per_page") perPage: Int = 100,
+        @Query("page") page: Int = 1,
         @Query("type") type: String = "all"
     ): Response<List<Repository>>
 
@@ -26,6 +27,14 @@ interface GitHubApiService {
     suspend fun createRepository(
         @Body request: CreateRepoRequest
     ): Response<Repository>
+
+    @GET("repos/{owner}/{repo}/git/trees/{tree_sha}")
+    suspend fun getGitTree(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("tree_sha") treeSha: String,
+        @Query("recursive") recursive: Int = 1
+    ): Response<GitTreeResponse>
 
     @GET("repos/{owner}/{repo}/contents/{path}")
     suspend fun getContents(
@@ -71,6 +80,7 @@ interface GitHubApiService {
     suspend fun getWorkflowRuns(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
+        @Query("branch") branch: String? = null,
         @Query("per_page") perPage: Int = 10
     ): Response<WorkflowRunsResponse>
 
@@ -89,11 +99,31 @@ interface GitHubApiService {
         @Path("job_id") jobId: Long
     ): Response<ResponseBody>
 
+    @GET("repos/{owner}/{repo}/actions/runs/{run_id}/artifacts")
+    suspend fun getArtifacts(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("run_id") runId: Long
+    ): Response<ArtifactsResponse>
+
+    @GET
+    @Streaming
+    suspend fun downloadRawUrl(
+        @Url url: String
+    ): Response<ResponseBody>
+
     @GET("repos/{owner}/{repo}/branches")
     suspend fun getBranches(
         @Path("owner") owner: String,
         @Path("repo") repo: String
     ): Response<List<Branch>>
+
+    @POST("repos/{owner}/{repo}/git/refs")
+    suspend fun createRef(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Body body: CreateRefRequest
+    ): Response<GitRef>
 
     @GET("repos/{owner}/{repo}/pulls")
     suspend fun getPullRequests(
@@ -109,6 +139,26 @@ interface GitHubApiService {
         @Body body: CreatePullRequest
     ): Response<PullRequest>
 
+    @PUT("repos/{owner}/{repo}/pulls/{pull_number}/merge")
+    suspend fun mergePullRequest(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("pull_number") pullNumber: Int,
+        @Body body: MergePullRequest
+    ): Response<MergeResponse>
+
+    @GET("search/code")
+    suspend fun searchCode(
+        @Query("q", encoded = true) query: String,
+        @Query("per_page") perPage: Int = 30
+    ): Response<CodeSearchResponse>
+
+    @GET("repos/{owner}/{repo}/releases/latest")
+    suspend fun getLatestRelease(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String
+    ): Response<GitHubRelease>
+
     companion object {
         private const val BASE_URL = "https://api.github.com/"
 
@@ -119,7 +169,7 @@ interface GitHubApiService {
 
             val client = OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS)
                 .addInterceptor { chain ->
                     val requestBuilder = chain.request().newBuilder()
                         .header("Accept", "application/vnd.github+json")
