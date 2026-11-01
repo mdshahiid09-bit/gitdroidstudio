@@ -13,22 +13,22 @@ import java.util.concurrent.TimeUnit
 interface GitHubApiService {
 
     @GET("user")
-    async suspend fun getCurrentUser(): Response<GitHubUser>
+    suspend fun getCurrentUser(): Response<GitHubUser>
 
     @GET("user/repos")
-    async suspend fun getUserRepositories(
+    suspend fun getUserRepositories(
         @Query("sort") sort: String = "updated",
         @Query("per_page") perPage: Int = 100,
         @Query("type") type: String = "all"
     ): Response<List<Repository>>
 
     @POST("user/repos")
-    async suspend fun createRepository(
+    suspend fun createRepository(
         @Body request: CreateRepoRequest
     ): Response<Repository>
 
     @GET("repos/{owner}/{repo}/contents/{path}")
-    async suspend fun getContents(
+    suspend fun getContents(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Path(value = "path", encoded = true) path: String = "",
@@ -36,7 +36,7 @@ interface GitHubApiService {
     ): Response<List<GitHubFile>>
 
     @GET("repos/{owner}/{repo}/contents/{path}")
-    async suspend fun getSingleFile(
+    suspend fun getSingleFile(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Path(value = "path", encoded = true) path: String,
@@ -44,7 +44,7 @@ interface GitHubApiService {
     ): Response<GitHubFile>
 
     @PUT("repos/{owner}/{repo}/contents/{path}")
-    async suspend fun createOrUpdateFile(
+    suspend fun createOrUpdateFile(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Path(value = "path", encoded = true) path: String,
@@ -52,7 +52,7 @@ interface GitHubApiService {
     ): Response<ResponseBody>
 
     @HTTP(method = "DELETE", path = "repos/{owner}/{repo}/contents/{path}", hasBody = true)
-    async suspend fun deleteFile(
+    suspend fun deleteFile(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Path(value = "path", encoded = true) path: String,
@@ -60,7 +60,7 @@ interface GitHubApiService {
     ): Response<ResponseBody>
 
     @POST("repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches")
-    async suspend fun dispatchWorkflow(
+    suspend fun dispatchWorkflow(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Path("workflow_id") workflowId: String = "build.yml",
@@ -68,14 +68,14 @@ interface GitHubApiService {
     ): Response<ResponseBody>
 
     @GET("repos/{owner}/{repo}/actions/runs")
-    async suspend fun getWorkflowRuns(
+    suspend fun getWorkflowRuns(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Query("per_page") perPage: Int = 10
     ): Response<WorkflowRunsResponse>
 
     @GET("repos/{owner}/{repo}/actions/runs/{run_id}/jobs")
-    async suspend fun getWorkflowJobs(
+    suspend fun getWorkflowJobs(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Path("run_id") runId: Long
@@ -83,27 +83,27 @@ interface GitHubApiService {
 
     @GET("repos/{owner}/{repo}/actions/jobs/{job_id}/logs")
     @Streaming
-    async suspend fun getJobLogs(
+    suspend fun getJobLogs(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Path("job_id") jobId: Long
     ): Response<ResponseBody>
 
     @GET("repos/{owner}/{repo}/branches")
-    async suspend fun getBranches(
+    suspend fun getBranches(
         @Path("owner") owner: String,
         @Path("repo") repo: String
     ): Response<List<Branch>>
 
     @GET("repos/{owner}/{repo}/pulls")
-    async suspend fun getPullRequests(
+    suspend fun getPullRequests(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Query("state") state: String = "open"
     ): Response<List<PullRequest>>
 
     @POST("repos/{owner}/{repo}/pulls")
-    async suspend fun createPullRequest(
+    suspend fun createPullRequest(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Body body: CreatePullRequest
