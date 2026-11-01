@@ -28,13 +28,30 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
-      - name: Accept Android SDK Licenses
-        run: yes | sdkmanager --licenses || true
+      - name: Setup Android SDK and Licenses
+        run: |
+          SDK_MGR=""
+          if command -v sdkmanager >/dev/null 2>&1; then
+            SDK_MGR="sdkmanager"
+          elif [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDK_MGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          elif [ -n "$ANDROID_SDK_ROOT" ] && [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDK_MGR="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          if [ -n "$SDK_MGR" ]; then
+            echo "Using sdkmanager at: $SDK_MGR"
+            yes | "$SDK_MGR" --licenses || true
+            "$SDK_MGR" "platforms;android-35" "build-tools;35.0.0" || true
+          else
+            echo "sdkmanager not found in standard paths, relying on runner environment..."
+          fi
 
       - name: Ensure Gradle Wrapper Executable
         run: chmod +x gradlew
@@ -52,15 +69,14 @@ jobs:
         run: |
           LOG_FILE="failure_log.txt"
           echo "=== Build Failure Diagnostic ===" > "$LOG_FILE"
-          for f in build_debug_log.txt; do
-            if [ -f "$f" ]; then
-              echo "--- Compiler / Error lines in $f ---" >> "$LOG_FILE"
-              grep -E "(^e:|^w: |error:|Compilation error|FAILURE:|FAILED)" "$f" | head -n 50 >> "$LOG_FILE" || true
-              echo "--- Log Tail: $f ---" >> "$LOG_FILE"
-              tail -n 50 "$f" >> "$LOG_FILE"
-              echo "" >> "$LOG_FILE"
-            fi
-          done
+          if [ -f "build_debug_log.txt" ]; then
+            echo "--- Compiler / Error lines in build_debug_log.txt ---" >> "$LOG_FILE"
+            grep -E "(^e:|^w: |error:|Compilation error|FAILURE:|FAILED)" build_debug_log.txt | head -n 50 >> "$LOG_FILE" || true
+            echo "--- Log Tail: build_debug_log.txt ---" >> "$LOG_FILE"
+            tail -n 50 build_debug_log.txt >> "$LOG_FILE"
+          else
+            echo "build_debug_log.txt not found. A step prior to assembleDebug failed." >> "$LOG_FILE"
+          fi
           gh issue create --title "Build Diagnostic #${{ github.run_number }}" --body "Automated build failure log:
           \`\`\`
           $(cat "$LOG_FILE" | head -n 140)
