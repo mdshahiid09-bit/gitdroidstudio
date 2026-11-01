@@ -44,6 +44,16 @@ data class ConflictState(
     val remoteSha: String
 )
 
+data class CommitNotification(
+    val sha: String,
+    val commitUrl: String
+)
+
+data class ApiErrorDialogState(
+    val statusCode: Int,
+    val message: String
+)
+
 enum class DiffType {
     ADDED,
     DELETED,
@@ -67,6 +77,9 @@ class ProjectViewModel(
     private val _fileTree = MutableStateFlow<List<FileNode>>(emptyList())
     val fileTree: StateFlow<List<FileNode>> = _fileTree.asStateFlow()
 
+    private val _expandedFolders = MutableStateFlow<Set<String>>(emptySet())
+    val expandedFolders: StateFlow<Set<String>> = _expandedFolders.asStateFlow()
+
     private val _openTabs = MutableStateFlow<List<EditorTab>>(emptyList())
     val openTabs: StateFlow<List<EditorTab>> = _openTabs.asStateFlow()
 
@@ -81,6 +94,12 @@ class ProjectViewModel(
 
     private val _lastCommitSha = MutableStateFlow<String?>(null)
     val lastCommitSha: StateFlow<String?> = _lastCommitSha.asStateFlow()
+
+    private val _lastCommitNotification = MutableStateFlow<CommitNotification?>(null)
+    val lastCommitNotification: StateFlow<CommitNotification?> = _lastCommitNotification.asStateFlow()
+
+    private val _apiErrorDialog = MutableStateFlow<ApiErrorDialogState?>(null)
+    val apiErrorDialog: StateFlow<ApiErrorDialogState?> = _apiErrorDialog.asStateFlow()
 
     private val _buildStatus = MutableStateFlow<BuildStatus>(BuildStatus.Idle)
     val buildStatus: StateFlow<BuildStatus> = _buildStatus.asStateFlow()
@@ -120,6 +139,9 @@ class ProjectViewModel(
 
     private val _showMissingWorkflowDialog = MutableStateFlow(false)
     val showMissingWorkflowDialog: StateFlow<Boolean> = _showMissingWorkflowDialog.asStateFlow()
+
+    private val _showDispatch404Dialog = MutableStateFlow(false)
+    val showDispatch404Dialog: StateFlow<Boolean> = _showDispatch404Dialog.asStateFlow()
 
     private val _workflowDispatchError = MutableStateFlow<String?>(null)
     val workflowDispatchError: StateFlow<String?> = _workflowDispatchError.asStateFlow()
@@ -228,8 +250,33 @@ class ProjectViewModel(
 
     fun toggleFolder(node: FileNode) {
         if (!node.isDirectory) return
-        node.isExpanded = !node.isExpanded
-        _fileTree.value = _fileTree.value.toList()
+        val current = _expandedFolders.value
+        _expandedFolders.value = if (current.contains(node.path)) {
+            current - node.path
+        } else {
+            current + node.path
+        }
+    }
+
+    fun toggleFolder(path: String) {
+        val current = _expandedFolders.value
+        _expandedFolders.value = if (current.contains(path)) {
+            current - path
+        } else {
+            current + path
+        }
+    }
+
+    fun dismissCommitNotification() {
+        _lastCommitNotification.value = null
+    }
+
+    fun dismissApiErrorDialog() {
+        _apiErrorDialog.value = null
+    }
+
+    fun dismissDispatch404Dialog() {
+        _showDispatch404Dialog.value = false
     }
 
     fun openFile(node: FileNode) {
@@ -269,6 +316,10 @@ class ProjectViewModel(
                     updateSuggestions(decoded)
                 } else {
                     _statusMessage.value = "Error opening file (HTTP ${resp.code()})"
+                    _apiErrorDialog.value = ApiErrorDialogState(
+                        statusCode = resp.code(),
+                        message = "Could not open ${node.name}: HTTP ${resp.code()}"
+                    )
                 }
             } catch (e: Exception) {
                 _statusMessage.value = "Error: ${e.localizedMessage}"
@@ -399,7 +450,7 @@ class ProjectViewModel(
         viewModelScope.launch {
             _statusMessage.value = "Saving ${tab.file.name} to GitHub..."
             try {
-                val message = commitMessage?.ifBlank { "Update ${tab.file.name}" } ?: "Update ${tab.file.name}"
+                val message = commitMessage?.ifBlank { "Update ${tab.file.path}" } ?: "Update ${tab.file.path}"
                 val encodedContent = Base64.encodeToString(tab.content.toByteArray(), Base64.NO_WRAP)
 
                 val updateReq = FileContentUpdate(
@@ -410,17 +461,19 @@ class ProjectViewModel(
                 )
 
                 val response = apiService.createOrUpdateFile(owner, repo, tab.file.path, updateReq)
-                if (response.isSuccessful) {
+                if (response.isSuccessful && response.body() != null) {
+                    val resBody = response.body()!!
                     tab.isModified = false
                     tab.originalContent = tab.content
+                    tab.sha = resBody.content?.sha ?: tab.sha
                     _openTabs.value = _openTabs.value.toList()
 
-                    // Refresh latest SHA from remote
-                    val ref = apiService.getSingleFile(owner, repo, tab.file.path, _activeBranch.value)
-                    if (ref.isSuccessful && ref.body() != null) {
-                        tab.sha = ref.body()!!.sha
-                    }
-                    _statusMessage.value = "Committed & Pushed successfully! 🚀"
+                    val commitSha = resBody.commit?.sha ?: ""
+                    val commitUrl = resBody.commit?.htmlUrl ?: "https://github.com/$owner/$repo/commit/$commitSha"
+
+                    _lastCommitSha.value = commitSha
+                    _lastCommitNotification.value = CommitNotification(sha = commitSha, commitUrl = commitUrl)
+                    _statusMessage.value = "Committed & Pushed: ${if (commitSha.length >= 7) commitSha.take(7) else commitSha} 🚀"
                 } else if (response.code() == 409) {
                     // Conflict: remote file changed
                     val remote = apiService.getSingleFile(owner, repo, tab.file.path, _activeBranch.value)
@@ -437,10 +490,20 @@ class ProjectViewModel(
                         remoteSha = remote.body()?.sha ?: ""
                     )
                 } else {
+                    val errBody = try { response.errorBody()?.string() } catch (_: Exception) { null }
+                    val errorMsg = errBody?.ifBlank { response.message() } ?: response.message()
                     _statusMessage.value = "Push failed: HTTP ${response.code()}"
+                    _apiErrorDialog.value = ApiErrorDialogState(
+                        statusCode = response.code(),
+                        message = "GitHub API save error (HTTP ${response.code()}):\n$errorMsg"
+                    )
                 }
             } catch (e: Exception) {
                 _statusMessage.value = "Save error: ${e.localizedMessage}"
+                _apiErrorDialog.value = ApiErrorDialogState(
+                    statusCode = 0,
+                    message = "Network error: ${e.localizedMessage}"
+                )
             }
         }
     }
@@ -512,6 +575,10 @@ class ProjectViewModel(
                     loadFileTreeRecursive()
                 } else {
                     _statusMessage.value = "Create failed: HTTP ${response.code()}"
+                    _apiErrorDialog.value = ApiErrorDialogState(
+                        statusCode = response.code(),
+                        message = "Failed to create file $filePath (HTTP ${response.code()})"
+                    )
                 }
             } catch (e: Exception) {
                 _statusMessage.value = "Error creating file: ${e.message}"
@@ -559,6 +626,11 @@ class ProjectViewModel(
                     }
                     _statusMessage.value = "Renamed successfully"
                     loadFileTreeRecursive()
+                } else {
+                    _apiErrorDialog.value = ApiErrorDialogState(
+                        statusCode = createResp.code(),
+                        message = "Failed to rename to $newPath (HTTP ${createResp.code()})"
+                    )
                 }
             } catch (e: Exception) {
                 _statusMessage.value = "Rename error: ${e.localizedMessage}"
@@ -588,6 +660,10 @@ class ProjectViewModel(
                     loadFileTreeRecursive()
                 } else {
                     _statusMessage.value = "Delete failed (HTTP ${response.code()})"
+                    _apiErrorDialog.value = ApiErrorDialogState(
+                        statusCode = response.code(),
+                        message = "Failed to delete ${fileNode.name} (HTTP ${response.code()})"
+                    )
                 }
             } catch (e: Exception) {
                 _statusMessage.value = "Error: ${e.localizedMessage}"
@@ -665,7 +741,7 @@ class ProjectViewModel(
                     branches: [main]
                   workflow_dispatch:
                 permissions:
-                  contents: read
+                  contents: write
                 concurrency:
                   group: build-${'$'}{{ github.ref }}
                   cancel-in-progress: true
@@ -729,12 +805,14 @@ class ProjectViewModel(
                     delay(3000)
                     startPollingWorkflow()
                 } else if (dispatch.code() == 404) {
-                    _buildStatus.value = BuildStatus.Failure("Workflow 'build.yml' was not found or missing 'workflow' scope.")
-                    _workflowDispatchError.value = "Workflow 'build.yml' was not found on branch '${_activeBranch.value}', or your GitHub PAT is missing the 'workflow' scope."
+                    _buildStatus.value = BuildStatus.Failure("Workflow 'build.yml' was not found or missing 'workflow' scope (404).")
                     _buildLogs.value += "Dispatch failed: HTTP 404 (Workflow not found or missing 'workflow' scope).\n"
+                    _showDispatch404Dialog.value = true
                 } else {
-                    _buildStatus.value = BuildStatus.Failure("Dispatch failed: HTTP ${dispatch.code()} ${dispatch.message()}")
-                    _buildLogs.value += "Dispatch failed: HTTP ${dispatch.code()} ${dispatch.message()}\n"
+                    val errBody = try { dispatch.errorBody()?.string() } catch (_: Exception) { null }
+                    val msg = errBody?.ifBlank { dispatch.message() } ?: dispatch.message()
+                    _buildStatus.value = BuildStatus.Failure("Dispatch failed: HTTP ${dispatch.code()} $msg")
+                    _buildLogs.value += "Dispatch failed: HTTP ${dispatch.code()} $msg\n"
                 }
             } catch (e: Exception) {
                 _buildStatus.value = BuildStatus.Failure(e.localizedMessage ?: "Error")
