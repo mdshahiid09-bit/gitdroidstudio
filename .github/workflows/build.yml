@@ -56,7 +56,7 @@ jobs:
           for f in build_debug_log.txt; do
             if [ -f "$f" ]; then
               echo "--- Compiler / Error lines in $f ---" >> "$LOG_FILE"
-              grep -E "(^e:|^w: |error:|Compilation error|FAILURE:|FAILED)" "$f" | head -n 40 >> "$LOG_FILE" || true
+              grep -C 5 -E "(FAILED|AAR metadata|compileSdkVersion|minCompileSdk|error:|Exception)" "$f" | head -n 60 >> "$LOG_FILE" || true
               echo "--- Log Tail: $f ---" >> "$LOG_FILE"
               tail -n 40 "$f" >> "$LOG_FILE"
               echo "" >> "$LOG_FILE"
